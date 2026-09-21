@@ -1,0 +1,22 @@
+export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER';
+
+export interface Episode {
+  id: string;
+  title: string;
+  duration: string;
+  rating: string;
+}
+
+export interface DramaItem {
+  id: string;
+  title: string;
+  category: string;
+  genre: string;
+  rating: string;
+  badge: 'VIP' | 'FREE';
+  progress?: number;
+  timeLeft?: string;
+  tag?: string;
+  description: string;
+  episodes: Episode[];
+}
