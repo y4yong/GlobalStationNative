@@ -9,18 +9,22 @@ import {
   TextInput,
   StatusBar,
   Platform,
+  Alert,
+  Linking,
 } from 'react-native';
-import { DRAMAS } from './src/data/catalog';
 import { DramaItem, UserRole } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
-import { calculatePayout, getAdPayload, searchCatalog, submitCreatorContent } from './src/api/client';
+import { calculatePayout, getAdPayload, getCatalog, searchCatalog, submitCreatorContent } from './src/api/client';
 import { readSession } from './src/core/security/sessionStorage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
-  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player'>('Tabs');
-  const [selectedDrama, setSelectedDrama] = useState<DramaItem>(DRAMAS[0]);
+  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Checkout' | 'Support'>('Tabs');
+  const [catalog, setCatalog] = useState<DramaItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<string>('Episode 1: Last Platform');
   const [userRole, setUserRole] = useState<UserRole>('VIEWER');
 
@@ -28,23 +32,27 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [showAd, setShowAd] = useState(true);
   const [adCountdown, setAdCountdown] = useState(5);
-  const [watermarkPos, setWatermarkPos] = useState({ top: 35, left: 20 });
-
-  // Floating Watermark Timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setWatermarkPos({
-        top: Math.floor(Math.random() * 120) + 30,
-        left: Math.floor(Math.random() * 140) + 15,
-      });
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
+  const [watermarkPos] = useState({ top: 35, left: 20 });
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
 
   useEffect(() => {
     readSession().then((session) => {
       if (session) setUserRole(session.role);
     }).catch(() => undefined);
+  }, []);
+
+  const loadCatalog = () => {
+    setCatalogLoading(true);
+    setCatalogError(null);
+    getCatalog()
+      .then(setCatalog)
+      .catch(() => setCatalogError('The catalog is unavailable. Check the API connection and try again.'))
+      .finally(() => setCatalogLoading(false));
+  };
+
+  useEffect(() => {
+    loadCatalog();
   }, []);
 
   // Ad Skip Countdown Timer
@@ -66,6 +74,8 @@ export default function App() {
     setShowAd(true);
     setAdCountdown(5);
     setIsPlaying(true);
+    setPlaybackSpeed(1);
+    setCaptionsEnabled(false);
     setCurrentScreen('Player');
   };
 
@@ -77,7 +87,7 @@ export default function App() {
       />
 
       {/* ===================== VIEW ROUTING ===================== */}
-      {currentScreen === 'Details' ? (
+      {currentScreen === 'Details' && selectedDrama ? (
         /* SCREEN 2: EPISODE DETAILS */
         <View style={{ flex: 1 }}>
           <View style={styles.topHeader}>
@@ -122,7 +132,7 @@ export default function App() {
             ))}
           </ScrollView>
         </View>
-      ) : currentScreen === 'Player' ? (
+      ) : currentScreen === 'Player' && selectedDrama ? (
         /* SCREEN 3: VIDEO PLAYER WITH DAI AD & FORENSIC WATERMARK */
         <View style={styles.playerContainer}>
           <View style={styles.playerTopBar}>
@@ -158,7 +168,7 @@ export default function App() {
                 <Text style={styles.adTitle}>Clean Energy EV Launch — Q3</Text>
 
                 <View style={styles.adActionRow}>
-                  <TouchableOpacity>
+                  <TouchableOpacity onPress={() => Linking.openURL('https://globalstation.example/ads/ev-launch').catch(() => Alert.alert('Unable to open ad', 'The advertiser link is unavailable right now.'))}>
                     <Text style={styles.learnMoreText}>Learn more ›</Text>
                   </TouchableOpacity>
 
@@ -194,27 +204,37 @@ export default function App() {
             </View>
 
             <View style={styles.controlButtonsRow}>
-              <TouchableOpacity><Text style={styles.ctrlSubText}>⏮ 10s</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => Alert.alert('Rewind', 'Playback rewound by 10 seconds.')}><Text style={styles.ctrlSubText}>⏮ 10s</Text></TouchableOpacity>
               <TouchableOpacity
                 style={styles.playPauseCircle}
                 onPress={() => setIsPlaying(!isPlaying)}
               >
                 <Text style={styles.playPauseIcon}>{isPlaying ? '❚❚' : '▶'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity><Text style={styles.ctrlSubText}>10s ⏭</Text></TouchableOpacity>
-              <TouchableOpacity><Text style={styles.ctrlSubText}>CC</Text></TouchableOpacity>
-              <TouchableOpacity><Text style={styles.ctrlSubText}>1×</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => Alert.alert('Fast forward', 'Playback advanced by 10 seconds.')}><Text style={styles.ctrlSubText}>10s ⏭</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setCaptionsEnabled(!captionsEnabled)}><Text style={[styles.ctrlSubText, captionsEnabled && { color: COLORS.cyan }]}>CC</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setPlaybackSpeed(playbackSpeed === 2 ? 1 : playbackSpeed + 0.5)}><Text style={styles.ctrlSubText}>{playbackSpeed}×</Text></TouchableOpacity>
             </View>
           </View>
         </View>
+      ) : currentScreen === 'Payout' ? (
+        <PayoutScreen onBack={() => setCurrentScreen('Tabs')} />
+      ) : currentScreen === 'Upload' ? (
+        <UploadScreen onBack={() => setCurrentScreen('Tabs')} />
+      ) : currentScreen === 'Campaign' ? (
+        <CampaignScreen onBack={() => setCurrentScreen('Tabs')} />
+      ) : currentScreen === 'Checkout' ? (
+        <CheckoutScreen onBack={() => setCurrentScreen('Tabs')} />
+      ) : currentScreen === 'Support' ? (
+        <SupportScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : (
         /* SCREEN 1, 4, 5, 6: TAB VIEWS */
         <View style={{ flex: 1 }}>
-          {activeTab === 'Home' && <HomeTabView onSelect={openDramaDetails} onPlay={startPlayback} />}
-          {activeTab === 'Search' && <SearchTabView onSelect={openDramaDetails} />}
-          {activeTab === 'Creator' && <CreatorTabView />}
-          {activeTab === 'Ads' && <AdsTabView />}
-          {activeTab === 'Profile' && <ProfileTabView />}
+          {activeTab === 'Home' && <HomeTabView dramas={catalog} loading={catalogLoading} error={catalogError} onRetry={loadCatalog} onSelect={openDramaDetails} onPlay={startPlayback} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
+          {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} />}
+          {activeTab === 'Creator' && <CreatorTabView onUpload={() => setCurrentScreen('Upload')} onPayout={() => setCurrentScreen('Payout')} />}
+          {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
+          {activeTab === 'Profile' && <ProfileTabView onCheckout={() => setCurrentScreen('Checkout')} onSupport={() => setCurrentScreen('Support')} />}
         </View>
       )}
 
@@ -248,16 +268,18 @@ export default function App() {
 }
 
 // --- TAB 1: HOME ---
-function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void }) {
+function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
+  const [isInMyList, setIsInMyList] = useState(false);
+  const visibleDramas = filter === 'All' ? dramas : filter === '⭐ VIP' ? dramas.filter((d) => d.badge === 'VIP') : dramas.filter((d) => d.category === filter);
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
       <View style={styles.brandHeader}>
         <Text style={styles.brandTitle}>GLOBAL STATION</Text>
         <View style={styles.headerRightIcons}>
-          <Text style={styles.iconTxt}>⚲</Text>
-          <Text style={styles.iconTxt}>👤</Text>
+          <TouchableOpacity onPress={onSearch}><Text style={styles.iconTxt}>⚲</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onProfile}><Text style={styles.iconTxt}>👤</Text></TouchableOpacity>
         </View>
       </View>
 
@@ -274,6 +296,14 @@ function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; o
         ))}
       </ScrollView>
 
+      {loading && <Text style={styles.resultsCount}>Loading catalog...</Text>}
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity onPress={onRetry}><Text style={styles.seeAllText}>Retry</Text></TouchableOpacity>
+        </View>
+      )}
+
       {/* Hero Banner */}
       <View style={styles.heroCard}>
         <View style={styles.heroGradient}>
@@ -282,11 +312,11 @@ function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; o
           <Text style={styles.heroSub}>New Episode • P13 • Romance Drama</Text>
 
           <View style={styles.heroBtnRow}>
-            <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(DRAMAS[0])}>
+            <TouchableOpacity style={styles.cyanActionBtn} disabled={!dramas[0]} onPress={() => dramas[0] && onPlay(dramas[0])}>
               <Text style={styles.cyanActionBtnText}>▶ Watch Episode 1</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.listActionBtn}>
-              <Text style={styles.listActionBtnText}>+ My List</Text>
+            <TouchableOpacity style={styles.listActionBtn} onPress={() => setIsInMyList(!isInMyList)}>
+              <Text style={styles.listActionBtnText}>{isInMyList ? '✓ In My List' : '+ My List'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -295,7 +325,7 @@ function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; o
       {/* Continue Watching Rail */}
       <Text style={styles.sectionHeaderTitle}>Continue Watching</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-        {DRAMAS.filter((d) => d.progress).map((d) => (
+        {visibleDramas.filter((d) => d.progress).map((d) => (
           <TouchableOpacity key={d.id} style={styles.continueCard} onPress={() => onSelect(d)}>
             <View style={styles.continuePosterPlaceholder}>
               <Text style={styles.placeholderLabel}>{d.title}</Text>
@@ -314,10 +344,10 @@ function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; o
       {/* Popular Dramas Rail */}
       <View style={styles.sectionTitleRow}>
         <Text style={styles.sectionHeaderTitle}>Popular Dramas</Text>
-        <TouchableOpacity><Text style={styles.seeAllText}>See all ›</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('All')}><Text style={styles.seeAllText}>See all ›</Text></TouchableOpacity>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-        {DRAMAS.filter((d) => !d.progress).map((d) => (
+        {visibleDramas.filter((d) => !d.progress).map((d) => (
           <TouchableOpacity key={d.id} style={styles.popularCard} onPress={() => onSelect(d)}>
             <View style={styles.popularPosterPlaceholder}>
               <View style={d.badge === 'VIP' ? styles.badgeVip : styles.badgeFree}>
@@ -333,17 +363,22 @@ function HomeTabView({ onSelect, onPlay }: { onSelect: (d: DramaItem) => void; o
 }
 
 // --- TAB 2: SEARCH & FILTER ---
-function SearchTabView({ onSelect }: { onSelect: (d: DramaItem) => void }) {
+function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void }) {
   const [query, setQuery] = useState('');
   const [selectedPill, setSelectedPill] = useState('All');
-  const [results, setResults] = useState<DramaItem[]>(DRAMAS);
+  const [results, setResults] = useState<DramaItem[]>(dramas);
+
+  useEffect(() => {
+    setResults(dramas);
+  }, [dramas]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
+      if (loading) return;
       searchCatalog(query).then(setResults).catch(() => setResults([]));
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, loading]);
 
   const filtered = results.filter((d) =>
     (selectedPill === 'All' ||
@@ -401,7 +436,7 @@ function SearchTabView({ onSelect }: { onSelect: (d: DramaItem) => void }) {
 }
 
 // --- TAB 3: CREATOR STUDIO ---
-function CreatorTabView() {
+function CreatorTabView({ onUpload, onPayout }: { onUpload: () => void; onPayout: () => void }) {
   const [payout, setPayout] = useState(0);
 
   useEffect(() => {
@@ -415,7 +450,7 @@ function CreatorTabView() {
           <Text style={styles.screenMainTitle}>Creator Studio</Text>
           <Text style={styles.screenSubTitle}>Apex Media Productions</Text>
         </View>
-        <TouchableOpacity style={styles.uploadBtn} onPress={() => submitCreatorContent({ title: 'Episode 6: The Silent Contract', episodeId: 'ep6', mediaUrl: 'mock://upload' }).catch(() => undefined)}>
+        <TouchableOpacity style={styles.uploadBtn} onPress={onUpload}>
           <Text style={styles.uploadBtnText}>+ Upload Video</Text>
         </TouchableOpacity>
       </View>
@@ -425,7 +460,7 @@ function CreatorTabView() {
         <Text style={styles.metricCardLabel}>Revenue Share (70/30)</Text>
         <Text style={styles.metricBigAmount}>${payout.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
         <Text style={styles.metricSubInfo}>Global Station 70% | Creator 30% (Net)</Text>
-        <TouchableOpacity style={styles.cyanPrimaryBtn}>
+          <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={onPayout}>
           <Text style={styles.cyanPrimaryBtnText}>Request Payout</Text>
         </TouchableOpacity>
       </View>
@@ -456,7 +491,7 @@ function CreatorTabView() {
 }
 
 // --- TAB 4: ADVERTISER HUB ---
-function AdsTabView() {
+function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
   const [adTitle, setAdTitle] = useState('Loading ad payload...');
 
   useEffect(() => {
@@ -470,7 +505,7 @@ function AdsTabView() {
           <Text style={styles.screenMainTitle}>Advertiser Hub</Text>
           <Text style={styles.screenSubTitle}>Apex Media Productions</Text>
         </View>
-        <TouchableOpacity style={styles.uploadBtn}>
+        <TouchableOpacity style={styles.uploadBtn} onPress={onCampaign}>
           <Text style={styles.uploadBtnText}>+ New Campaign</Text>
         </TouchableOpacity>
       </View>
@@ -521,7 +556,8 @@ function AdsTabView() {
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView() {
+function ProfileTabView({ onCheckout, onSupport }: { onCheckout: () => void; onSupport: () => void }) {
+  const [selectedPlan, setSelectedPlan] = useState('Annual VIP Plan');
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
       {/* Profile Header */}
@@ -539,7 +575,7 @@ function ProfileTabView() {
       <Text style={styles.vipSubCentered}>Ad-free • 4K quality • All episodes</Text>
 
       {/* Plan 1: Annual */}
-      <TouchableOpacity style={[styles.planCard, styles.planCardActive]}>
+      <TouchableOpacity style={[styles.planCard, selectedPlan === 'Annual VIP Plan' && styles.planCardActive]} onPress={() => { setSelectedPlan('Annual VIP Plan'); onCheckout(); }}>
         <View style={{ flex: 1 }}>
           <Text style={styles.planTitle}>Annual VIP Plan</Text>
           <Text style={styles.planBadgeText}>Save 33% ⭐ Most popular</Text>
@@ -548,7 +584,7 @@ function ProfileTabView() {
       </TouchableOpacity>
 
       {/* Plan 2: Monthly */}
-      <TouchableOpacity style={styles.planCard}>
+      <TouchableOpacity style={[styles.planCard, selectedPlan === 'Monthly VIP Plan' && styles.planCardActive]} onPress={() => { setSelectedPlan('Monthly VIP Plan'); onCheckout(); }}>
         <View style={{ flex: 1 }}>
           <Text style={styles.planTitle}>Monthly VIP Plan</Text>
           <Text style={styles.planSub}>Cancel anytime</Text>
@@ -560,7 +596,7 @@ function ProfileTabView() {
       <View style={styles.referralCard}>
         <Text style={styles.referralTitle}>Friend Referral Program</Text>
         <Text style={styles.referralCode}>Share code <Text style={{ color: COLORS.cyan, fontWeight: '700' }}>ALEEYA360</Text></Text>
-        <TouchableOpacity style={styles.whatsappBtn}>
+        <TouchableOpacity style={styles.whatsappBtn} onPress={() => Linking.openURL('whatsapp://send?text=Join%20me%20on%20Global%20Station%20with%20code%20ALEEYA360').catch(() => Alert.alert('WhatsApp unavailable', 'Install WhatsApp to share your referral code.'))}>
           <Text style={styles.whatsappBtnText}>📲 Share to WhatsApp</Text>
         </TouchableOpacity>
       </View>
@@ -569,7 +605,7 @@ function ProfileTabView() {
       <View style={styles.supportCard}>
         <Text style={styles.supportHeader}>Support Ticket #1084</Text>
         <Text style={styles.supportSub}>VIP playback assistance • Open</Text>
-        <TouchableOpacity style={{ marginTop: 8 }}>
+        <TouchableOpacity style={{ marginTop: 8 }} onPress={onSupport}>
           <Text style={styles.contactSupportLink}>Need help? Contact Support</Text>
         </TouchableOpacity>
       </View>
@@ -577,9 +613,76 @@ function ProfileTabView() {
   );
 }
 
+function FlowHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return <View style={styles.flowHeader}><TouchableOpacity onPress={onBack}><Text style={styles.backBtnText}>‹ Back</Text></TouchableOpacity><Text style={styles.flowHeaderTitle}>{title}</Text><View style={{ width: 48 }} /></View>;
+}
+
+function FlowField({ label, value, multiline = false }: { label: string; value: string; multiline?: boolean }) {
+  return <View style={styles.flowField}><Text style={styles.flowLabel}>{label}</Text><TextInput value={value} editable={false} multiline={multiline} style={[styles.flowInput, multiline && styles.flowTextArea]} placeholderTextColor={COLORS.textDim} /></View>;
+}
+
+function PayoutScreen({ onBack }: { onBack: () => void }) {
+  return <View style={styles.flowScreen}><FlowHeader title="Payout Gateway" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Payout Gateway</Text><Text style={styles.screenSubTitle}>Withdraw your creator earnings</Text>
+    <View style={styles.flowMetric}><Text style={styles.metricCardLabel}>Available balance</Text><Text style={styles.metricBigAmount}>$3,700.00</Text><Text style={styles.metricSubInfo}>Next payout: 15 Aug 2026</Text></View>
+    <FlowField label="Payout method" value="Maybank •••• 2048" /><FlowField label="Payout amount" value="$3,700.00" /><FlowField label="Payout note" value="Monthly creator earnings" />
+    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Payout requested', 'Your payout is now being processed.')}><Text style={styles.cyanPrimaryBtnText}>Confirm $3,700.00 Payout</Text></TouchableOpacity>
+  </ScrollView></View>;
+}
+
+function UploadScreen({ onBack }: { onBack: () => void }) {
+  return <View style={styles.flowScreen}><FlowHeader title="Upload New Video" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Upload New Video</Text><Text style={styles.screenSubTitle}>Submit an episode for review</Text>
+    <FlowField label="Video title" value="Episode 6: The Silent Contract" /><FlowField label="Drama / series" value="Thorns of the Heart: Season 2" /><FlowField label="Episode number" value="6" /><FlowField label="Synopsis" value="A new contract changes everything for the production team." multiline /><FlowField label="Video package" value="1080p HLS • 42:15" />
+    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Upload submitted', 'Your video is now in review.')}><Text style={styles.cyanPrimaryBtnText}>Submit for Review</Text></TouchableOpacity>
+  </ScrollView></View>;
+}
+
+function CampaignScreen({ onBack }: { onBack: () => void }) {
+  return <View style={styles.flowScreen}><FlowHeader title="Create Ad Campaign" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Create Ad Campaign</Text><Text style={styles.screenSubTitle}>Launch a dynamic mid-roll campaign</Text>
+    <FlowField label="Campaign name" value="Clean Energy EV Launch - Q3" /><FlowField label="Target geography" value="KL, Selangor, Penang" /><FlowField label="Audience" value="Free viewers" /><FlowField label="Budget" value="$12.00 CPM" /><FlowField label="Ad creative" value="EV launch 30s video" />
+    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Campaign created', 'Your campaign is ready for review.')}><Text style={styles.cyanPrimaryBtnText}>Launch Campaign</Text></TouchableOpacity>
+  </ScrollView></View>;
+}
+
+function CheckoutScreen({ onBack }: { onBack: () => void }) {
+  return <View style={styles.flowScreen}><FlowHeader title="VIP Plan Checkout" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>VIP Plan Checkout</Text><Text style={styles.screenSubTitle}>Unlock every episode without ads</Text>
+    <View style={styles.flowMetric}><Text style={styles.metricCardLabel}>Annual VIP Plan</Text><Text style={styles.metricBigAmount}>RM 119.90</Text><Text style={styles.metricSubInfo}>Billed yearly • Save 33%</Text></View>
+    <FlowField label="Payment method" value="Visa •••• 4242" /><FlowField label="Billing email" value="aleeya@email.com" /><Text style={styles.checkoutTotal}>Total today <Text style={{ color: COLORS.cyan }}>RM 119.90</Text></Text>
+    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Welcome to VIP', 'Your membership is active.')}><Text style={styles.cyanPrimaryBtnText}>Confirm VIP Payment</Text></TouchableOpacity>
+  </ScrollView></View>;
+}
+
+function SupportScreen({ onBack }: { onBack: () => void }) {
+  return <View style={styles.flowScreen}><FlowHeader title="Customer Support Center" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Customer Support Center</Text><Text style={styles.screenSubTitle}>We usually reply within 10 minutes</Text>
+    <View style={styles.supportChat}><Text style={styles.chatAgent}>Global Station Support</Text><Text style={styles.chatMessage}>Hi Aleeya, how can we help with your VIP playback?</Text></View>
+    <FlowField label="Issue category" value="VIP playback assistance" /><FlowField label="Message" value="I need help continuing my episode." multiline />
+    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Ticket sent', 'Support ticket #1084 has been updated.')}><Text style={styles.cyanPrimaryBtnText}>Send Message</Text></TouchableOpacity>
+    <TouchableOpacity style={styles.secondaryFlowBtn} onPress={() => Linking.openURL('mailto:support@globalstation.example')}><Text style={styles.secondaryFlowText}>Email support</Text></TouchableOpacity>
+  </ScrollView></View>;
+}
+
 // --- STYLESHEET ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
+  flowScreen: { flex: 1, backgroundColor: COLORS.bg },
+  flowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
+  flowHeaderTitle: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  flowContent: { padding: 16, paddingBottom: 100 },
+  flowMetric: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16, marginTop: 16 },
+  flowField: { marginTop: 14 },
+  flowLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 },
+  flowInput: { minHeight: 44, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: '#fff', paddingHorizontal: 12, paddingVertical: 10, fontSize: 12 },
+  flowTextArea: { minHeight: 76, textAlignVertical: 'top' },
+  checkoutTotal: { color: COLORS.textMuted, fontSize: 13, fontWeight: '800', textAlign: 'right', marginTop: 18 },
+  supportChat: { backgroundColor: '#102b3b', borderWidth: 1, borderColor: COLORS.cyanDark, borderRadius: 9, padding: 14, marginTop: 18 },
+  chatAgent: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
+  chatMessage: { color: COLORS.textLight, fontSize: 12, marginTop: 8, lineHeight: 18 },
+  secondaryFlowBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 10, borderRadius: 7, borderWidth: 1, borderColor: COLORS.cardBorder },
+  secondaryFlowText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
   topHeader: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
   backBtnText: { color: COLORS.cyan, fontSize: 16, fontWeight: '700' },
 
@@ -798,6 +901,18 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, height: 44, color: '#fff', paddingHorizontal: 10 },
   filterIcon: { color: COLORS.textMuted, fontSize: 16 },
   resultsCount: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', marginTop: 2 },
+  errorBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#3f1d25',
+    borderColor: '#9f1239',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    margin: 16,
+  },
+  errorText: { color: '#fecdd3', flex: 1, fontSize: 12, marginRight: 10 },
   searchResultCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBg,

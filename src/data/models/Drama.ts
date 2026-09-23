@@ -1,4 +1,4 @@
-export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER';
+export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 
 export interface Episode {
   id: string;

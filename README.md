@@ -86,6 +86,23 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+# Global Station API
+
+The mobile app expects the API at `http://10.0.2.2:5000/api/v1` when running in the Android emulator.
+
+From the repository root:
+
+```sh
+cd api
+npm install
+Copy-Item .env.example .env
+npm run db:migrate
+npm run db:seed
+npm run dev
+```
+
+The API requires MySQL. Start Laragon's MySQL service, then set `DATABASE_URL` and a JWT secret of at least 32 characters in `api/.env`. The seed command creates a development administrator at `admin@globalstation.local` with password `ChangeMe123!`; change or remove this account before any shared deployment.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:

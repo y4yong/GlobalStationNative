@@ -1,6 +1,6 @@
 import { DramaItem, UserRole } from '../data/models/Drama';
 
-const API_BASE_URL = '';
+const API_BASE_URL = 'http://10.0.2.2:5000/api/v1';
 const MOCK_STREAM_URL = 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -26,12 +26,7 @@ export interface AdPayload {
 }
 
 export async function getCatalog(): Promise<DramaItem[]> {
-  try {
-    return await request<DramaItem[]>('/catalog');
-  } catch {
-    const { DRAMAS } = await import('../data/catalog');
-    return DRAMAS;
-  }
+  return request<DramaItem[]>('/dramas');
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {
