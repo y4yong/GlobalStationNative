@@ -97,11 +97,32 @@ cd api
 npm install
 Copy-Item .env.example .env
 npm run db:migrate
-npm run db:seed
 npm run dev
 ```
 
-The API requires MySQL. Start Laragon's MySQL service, then set `DATABASE_URL` and a JWT secret of at least 32 characters in `api/.env`. The seed command creates a development administrator at `admin@globalstation.local` with password `ChangeMe123!`; change or remove this account before any shared deployment.
+The API uses PostgreSQL with PostGIS for geography and location rules. Install PostGIS on the PostgreSQL server, create the database with `api/sql/00_create_database.sql`, then set `DATABASE_URL` and a JWT secret of at least 32 characters in `api/.env`. `npm run db:migrate` applies the schema portion of `api/sql/complete_globalstation.sql` and does not insert development fixtures. Existing rows are left untouched. `npm run db:migrate:integrations` applies only the Billplz/ad schema changes. `npm run db:seed` is an explicit development-only operation that adds sample accounts and content; do not run it for production data.
+
+## External Services
+
+Copy the non-secret variable names from `api/.env.integrations.example` into `api/.env` and replace every placeholder locally. AWS uses the standard SDK credential chain or an attached IAM role; scope its permissions to the private media bucket. Configure a private S3 bucket, a CloudFront distribution restricted to that bucket, and a trusted key group whose private key is held only by the API. The creator upload route accepts MP4; it does not transcode to HLS. Playback URLs expire after five minutes.
+
+Billplz starts in sandbox mode. Configure its sandbox API key, collection ID, X Signature key, and an HTTPS `PUBLIC_API_URL` that Billplz can reach for callbacks. `localhost` is not reachable from Billplz; use a deployed HTTPS API or a secure development tunnel. VIP checkout uses server-configured MYR amounts and grants a fixed monthly/yearly term after a signature- and amount-verified callback; automatic recurring billing is not configured.
+
+Advertisers can submit HTTPS creatives and budgets. New campaigns start paused for administrator activation. Support tickets are stored for the customer and can be managed from the admin console. Provider-dependent routes return an explicit configuration error until their account settings are complete; no fake payment, media, ad, or ticket success is generated.
+
+The mobile viewer flow supports account registration and sign-in through the API. The current API does not include a first-administrator provisioning command; create an administrator through a separately secured operational process before using the admin console on a fresh database.
+
+## Admin Web
+
+The operational admin console lives in `admin-web` and uses the same API. With the API running:
+
+```sh
+cd admin-web
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` and sign in with an administrator account provisioned in the database. The console supports content approval/rejection, payout decisions, campaign pause/resume, user review, platform metrics, watch telemetry, and audited admin actions.
 
 # Learn More
 

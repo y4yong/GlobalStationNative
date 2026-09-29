@@ -1,5 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { keepLocalCopy, pick, types } from '@react-native-documents/picker';
+import ReactNativeBlobUtil from 'react-native-blob-util';
+import Video from 'react-native-video';
 import {
+  ActivityIndicator,
   SafeAreaView,
   View,
   Text,
@@ -12,11 +16,11 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { DramaItem, UserRole } from './src/data/models/Drama';
+import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
-import { calculatePayout, getAdPayload, getCatalog, searchCatalog, submitCreatorContent } from './src/api/client';
-import { readSession } from './src/core/security/sessionStorage';
+import { AdPayload, createAdvertiserCampaign, createCreatorUpload, createSupportTicket, createVipCheckout, getAdPayload, getCatalog, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listCreatorSubmissions, listSupportTickets, loginViewer, registerViewer, searchCatalog, submitCreatorContent, ViewerProfile } from './src/api/client';
+import { clearSession, readSession } from './src/core/security/sessionStorage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
@@ -25,21 +29,20 @@ export default function App() {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
-  const [selectedEpisode, setSelectedEpisode] = useState<string>('Episode 1: Last Platform');
-  const [userRole, setUserRole] = useState<UserRole>('VIEWER');
-
-  // Video Player States
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [showAd, setShowAd] = useState(true);
-  const [adCountdown, setAdCountdown] = useState(5);
-  const [watermarkPos] = useState({ top: 35, left: 20 });
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [selectedEpisode, setSelectedEpisode] = useState('');
+  const [adBreakComplete, setAdBreakComplete] = useState(false);
+  const [profile, setProfile] = useState<ViewerProfile | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
-    readSession().then((session) => {
-      if (session) setUserRole(session.role);
-    }).catch(() => undefined);
+    readSession().then(async (session) => {
+      if (!session) return;
+      try {
+        setProfile(await getViewerProfile());
+      } catch {
+        await clearSession();
+      }
+    }).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
 
   const loadCatalog = () => {
@@ -55,13 +58,21 @@ export default function App() {
     loadCatalog();
   }, []);
 
-  // Ad Skip Countdown Timer
-  useEffect(() => {
-    if (currentScreen === 'Player' && showAd && adCountdown > 0) {
-      const timer = setTimeout(() => setAdCountdown(adCountdown - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [currentScreen, showAd, adCountdown]);
+  if (!sessionReady) {
+    return <SafeAreaView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}><ActivityIndicator color={COLORS.cyan} /></SafeAreaView>;
+  }
+
+  if (!profile) {
+    return <AuthScreen onAuthenticated={setProfile} />;
+  }
+
+  const availableTabs = [
+    { key: 'Home', icon: '⌂', label: 'Home' },
+    { key: 'Search', icon: '⚲', label: 'Search' },
+    ...(profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '🎬', label: 'Creator' }] : []),
+    ...(profile.role === 'ADVERTISER' ? [{ key: 'Ads', icon: '📊', label: 'Ads' }] : []),
+    { key: 'Profile', icon: '👤', label: 'Profile' },
+  ];
 
   const openDramaDetails = (drama: DramaItem) => {
     setSelectedDrama(drama);
@@ -69,13 +80,14 @@ export default function App() {
   };
 
   const startPlayback = (drama: DramaItem, epTitle?: string) => {
+    const episode = drama.episodes.find((item) => item.title === epTitle) ?? drama.episodes[0];
+    if (!episode) {
+      Alert.alert('Playback unavailable', 'This title does not have an episode with a media source yet.');
+      return;
+    }
     setSelectedDrama(drama);
-    setSelectedEpisode(epTitle || drama.episodes[0]?.title || drama.title);
-    setShowAd(true);
-    setAdCountdown(5);
-    setIsPlaying(true);
-    setPlaybackSpeed(1);
-    setCaptionsEnabled(false);
+    setSelectedEpisode(episode.title);
+    setAdBreakComplete(false);
     setCurrentScreen('Player');
   };
 
@@ -133,7 +145,7 @@ export default function App() {
           </ScrollView>
         </View>
       ) : currentScreen === 'Player' && selectedDrama ? (
-        /* SCREEN 3: VIDEO PLAYER WITH DAI AD & FORENSIC WATERMARK */
+        /* SCREEN 3: AUTHORIZED VIDEO PLAYER */
         <View style={styles.playerContainer}>
           <View style={styles.playerTopBar}>
             <TouchableOpacity onPress={() => setCurrentScreen('Tabs')}>
@@ -142,79 +154,12 @@ export default function App() {
             <Text style={styles.playerScreenTitle} numberOfLines={1}>{selectedDrama.title} ({selectedDrama.rating})</Text>
           </View>
 
-          {/* Video Stage / Ad Area */}
           <View style={styles.videoStage}>
             <ProtectedVideoPlayer
-              episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)?.id || selectedDrama.episodes[0]?.id || selectedDrama.id}
-              paused={!isPlaying || showAd}
-              role={userRole}
+              episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
+              paused={!adBreakComplete}
             />
-            {/* Dynamic Watermark */}
-            <View pointerEvents="none" style={[styles.watermarkContainer, watermarkPos]}>
-              <Text style={styles.watermarkText}>FORENSIC WATERMARK</Text>
-              <Text style={styles.watermarkText}>UID: 84920 • IP: 175.143.22.8</Text>
-            </View>
-
-            {/* DAI Mid-roll Ad Overlay */}
-            {showAd ? (
-              <View style={styles.adCard}>
-                <View style={styles.adHeaderRow}>
-                  <View style={styles.daiBadge}>
-                    <Text style={styles.daiBadgeText}>DAI AD</Text>
-                  </View>
-                  <Text style={styles.adRemaining}>0:12 remaining</Text>
-                </View>
-
-                <Text style={styles.adTitle}>Clean Energy EV Launch — Q3</Text>
-
-                <View style={styles.adActionRow}>
-                  <TouchableOpacity onPress={() => Linking.openURL('https://globalstation.example/ads/ev-launch').catch(() => Alert.alert('Unable to open ad', 'The advertiser link is unavailable right now.'))}>
-                    <Text style={styles.learnMoreText}>Learn more ›</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    disabled={adCountdown > 0}
-                    style={[styles.skipBtn, adCountdown > 0 && { opacity: 0.6 }]}
-                    onPress={() => setShowAd(false)}
-                  >
-                    <Text style={styles.skipBtnText}>
-                      {adCountdown > 0 ? `Skip in ${adCountdown}s` : 'Skip Ad ›'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.activeStreamBanner}>
-                <Text style={{ color: COLORS.cyan, fontWeight: '700', fontSize: 16 }}>● STREAMING 1080p HLS</Text>
-                <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 4 }}>{selectedEpisode}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Player Timeline & Controls */}
-          <View style={styles.playerControlsArea}>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressBar, { width: showAd ? '40%' : '65%' }]} />
-            </View>
-
-            <View style={styles.timeRow}>
-              <Text style={styles.timeText}>14:20</Text>
-              <Text style={styles.midRollNotice}>● Mid-Roll Ad</Text>
-              <Text style={styles.timeText}>42:15</Text>
-            </View>
-
-            <View style={styles.controlButtonsRow}>
-              <TouchableOpacity onPress={() => Alert.alert('Rewind', 'Playback rewound by 10 seconds.')}><Text style={styles.ctrlSubText}>⏮ 10s</Text></TouchableOpacity>
-              <TouchableOpacity
-                style={styles.playPauseCircle}
-                onPress={() => setIsPlaying(!isPlaying)}
-              >
-                <Text style={styles.playPauseIcon}>{isPlaying ? '❚❚' : '▶'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => Alert.alert('Fast forward', 'Playback advanced by 10 seconds.')}><Text style={styles.ctrlSubText}>10s ⏭</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setCaptionsEnabled(!captionsEnabled)}><Text style={[styles.ctrlSubText, captionsEnabled && { color: COLORS.cyan }]}>CC</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setPlaybackSpeed(playbackSpeed === 2 ? 1 : playbackSpeed + 0.5)}><Text style={styles.ctrlSubText}>{playbackSpeed}×</Text></TouchableOpacity>
-            </View>
+            {!adBreakComplete && <AdBreak onComplete={() => setAdBreakComplete(true)} />}
           </View>
         </View>
       ) : currentScreen === 'Payout' ? (
@@ -232,21 +177,15 @@ export default function App() {
         <View style={{ flex: 1 }}>
           {activeTab === 'Home' && <HomeTabView dramas={catalog} loading={catalogLoading} error={catalogError} onRetry={loadCatalog} onSelect={openDramaDetails} onPlay={startPlayback} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
           {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} />}
-          {activeTab === 'Creator' && <CreatorTabView onUpload={() => setCurrentScreen('Upload')} onPayout={() => setCurrentScreen('Payout')} />}
+          {activeTab === 'Creator' && <CreatorTabView creatorName={profile.name} onUpload={() => setCurrentScreen('Upload')} />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
-          {activeTab === 'Profile' && <ProfileTabView onCheckout={() => setCurrentScreen('Checkout')} onSupport={() => setCurrentScreen('Support')} />}
+          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
         </View>
       )}
 
       {/* ===================== BOTTOM NAVIGATION ===================== */}
       <View style={styles.bottomNav}>
-        {[
-          { key: 'Home', icon: '⌂', label: 'Home' },
-          { key: 'Search', icon: '⚲', label: 'Search' },
-          { key: 'Creator', icon: '🎬', label: 'Creator' },
-          { key: 'Ads', icon: '📊', label: 'Ads' },
-          { key: 'Profile', icon: '👤', label: 'Profile' },
-        ].map((tab) => {
+        {availableTabs.map((tab) => {
           const isActive = activeTab === tab.key && currentScreen === 'Tabs';
           return (
             <TouchableOpacity
@@ -267,10 +206,53 @@ export default function App() {
   );
 }
 
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProfile) => void }) {
+  const [registering, setRegistering] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      const profile = registering
+        ? await registerViewer(name, email, password)
+        : await loginViewer(email, password);
+      onAuthenticated(profile);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to connect to your account.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 24 }]}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+        <Text style={styles.brandTitle}>GLOBAL STATION</Text>
+        <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
+        <Text style={styles.screenSubTitle}>Your account connects to the Global Station service.</Text>
+        {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
+        <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
+        <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
+        {!!error && <Text style={{ color: '#fca5a5', marginTop: 14 }}>{error}</Text>}
+        <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={submit}>
+          <Text style={styles.cyanPrimaryBtnText}>{busy ? 'Connecting...' : registering ? 'Create account' : 'Sign in'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ alignItems: 'center', padding: 16 }} onPress={() => { setRegistering(!registering); setError(''); }}>
+          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to Global Station? Create account'}</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
 // --- TAB 1: HOME ---
 function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
-  const [isInMyList, setIsInMyList] = useState(false);
   const visibleDramas = filter === 'All' ? dramas : filter === '⭐ VIP' ? dramas.filter((d) => d.badge === 'VIP') : dramas.filter((d) => d.category === filter);
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
@@ -305,22 +287,19 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
       )}
 
       {/* Hero Banner */}
-      <View style={styles.heroCard}>
+      {dramas[0] && <View style={styles.heroCard}>
         <View style={styles.heroGradient}>
-          <View style={styles.vipTag}><Text style={styles.vipTagText}>VIP EXCLUSIVE</Text></View>
-          <Text style={styles.heroDramaTitle}>Thorns of the Heart: Season 2</Text>
-          <Text style={styles.heroSub}>New Episode • P13 • Romance Drama</Text>
+          <View style={styles.vipTag}><Text style={styles.vipTagText}>{dramas[0].badge}</Text></View>
+          <Text style={styles.heroDramaTitle}>{dramas[0].title}</Text>
+          <Text style={styles.heroSub}>{dramas[0].genre} • {dramas[0].rating}</Text>
 
           <View style={styles.heroBtnRow}>
-            <TouchableOpacity style={styles.cyanActionBtn} disabled={!dramas[0]} onPress={() => dramas[0] && onPlay(dramas[0])}>
+            <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(dramas[0])}>
               <Text style={styles.cyanActionBtnText}>▶ Watch Episode 1</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.listActionBtn} onPress={() => setIsInMyList(!isInMyList)}>
-              <Text style={styles.listActionBtnText}>{isInMyList ? '✓ In My List' : '+ My List'}</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </View>}
 
       {/* Continue Watching Rail */}
       <Text style={styles.sectionHeaderTitle}>Continue Watching</Text>
@@ -436,66 +415,28 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
 }
 
 // --- TAB 3: CREATOR STUDIO ---
-function CreatorTabView({ onUpload, onPayout }: { onUpload: () => void; onPayout: () => void }) {
-  const [payout, setPayout] = useState(0);
+function CreatorTabView({ creatorName, onUpload }: { creatorName: string; onUpload: () => void }) {
+  const [submissions, setSubmissions] = useState<Awaited<ReturnType<typeof listCreatorSubmissions>>>([]);
+  const [error, setError] = useState('');
+  useEffect(() => { listCreatorSubmissions().then(setSubmissions).catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load submissions.')); }, []);
 
-  useEffect(() => {
-    calculatePayout(320000).then((result) => setPayout(result.amount));
-  }, []);
-
-  return (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
-      <View style={styles.creatorHeaderRow}>
-        <View>
-          <Text style={styles.screenMainTitle}>Creator Studio</Text>
-          <Text style={styles.screenSubTitle}>Apex Media Productions</Text>
-        </View>
-        <TouchableOpacity style={styles.uploadBtn} onPress={onUpload}>
-          <Text style={styles.uploadBtnText}>+ Upload Video</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Revenue Card */}
-      <View style={styles.metricCard}>
-        <Text style={styles.metricCardLabel}>Revenue Share (70/30)</Text>
-        <Text style={styles.metricBigAmount}>${payout.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
-        <Text style={styles.metricSubInfo}>Global Station 70% | Creator 30% (Net)</Text>
-          <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={onPayout}>
-          <Text style={styles.cyanPrimaryBtnText}>Request Payout</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={[styles.sectionHeaderTitle, { marginTop: 24 }]}>Content Pipeline</Text>
-
-      <View style={styles.pipelineCard}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pipelineTitle}>Episode 6: The Silent Contract</Text>
-          <Text style={styles.pipelineSub}>Submitted 2 hours ago</Text>
-        </View>
-        <View style={styles.badgeWarning}>
-          <Text style={styles.badgeWarningText}>IN REVIEW</Text>
-        </View>
-      </View>
-
-      <View style={styles.pipelineCard}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pipelineTitle}>Episode 5: Shadows in the City</Text>
-          <Text style={styles.pipelineSub}>185K Views • 4.1K Hours</Text>
-        </View>
-        <View style={styles.badgeSuccess}>
-          <Text style={styles.badgeSuccessText}>APPROVED</Text>
-        </View>
-      </View>
-    </ScrollView>
-  );
+  return <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
+    <View style={styles.creatorHeaderRow}><View><Text style={styles.screenMainTitle}>Creator Studio</Text><Text style={styles.screenSubTitle}>{creatorName}</Text></View><TouchableOpacity style={styles.uploadBtn} onPress={onUpload}><Text style={styles.uploadBtnText}>+ Upload video</Text></TouchableOpacity></View>
+    <Text style={styles.screenSubTitle}>Creator revenue and payouts will appear when those backend workflows are configured.</Text>
+    <Text style={[styles.sectionHeaderTitle, { marginTop: 24 }]}>Your submissions</Text>
+    {submissions.map((submission) => <View key={submission.id} style={styles.pipelineCard}><View style={{ flex: 1 }}><Text style={styles.pipelineTitle}>{submission.title}</Text><Text style={styles.pipelineSub}>{submission.episodeCount} episode(s) • {new Date(submission.createdAt).toLocaleDateString()}</Text></View><Text style={styles.badgeWarningText}>{submission.status.replace('_', ' ')}</Text></View>)}
+    {!error && submissions.length === 0 && <Text style={styles.screenSubTitle}>No content submissions yet.</Text>}
+    {!!error && <Text style={styles.errorText}>{error}</Text>}
+  </ScrollView>;
 }
 
 // --- TAB 4: ADVERTISER HUB ---
 function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
-  const [adTitle, setAdTitle] = useState('Loading ad payload...');
+  const [campaigns, setCampaigns] = useState<Awaited<ReturnType<typeof listAdvertiserCampaigns>>>([]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    getAdPayload().then((ad) => setAdTitle(ad.title));
+    listAdvertiserCampaigns().then(setCampaigns).catch((requestError) => setError(requestError instanceof Error ? requestError.message : 'Unable to load campaigns.'));
   }, []);
 
   return (
@@ -503,112 +444,98 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
       <View style={styles.creatorHeaderRow}>
         <View>
           <Text style={styles.screenMainTitle}>Advertiser Hub</Text>
-          <Text style={styles.screenSubTitle}>Apex Media Productions</Text>
+          <Text style={styles.screenSubTitle}>Campaigns from your account</Text>
         </View>
         <TouchableOpacity style={styles.uploadBtn} onPress={onCampaign}>
           <Text style={styles.uploadBtnText}>+ New Campaign</Text>
         </TouchableOpacity>
       </View>
-
-      {/* Campaign Card */}
-      <View style={styles.campaignCard}>
-        <View style={styles.campaignHeaderRow}>
-          <Text style={styles.campaignTitle}>{adTitle}</Text>
-          <View style={styles.badgeSuccess}>
-            <Text style={styles.badgeSuccessText}>ACTIVE</Text>
-          </View>
-        </View>
-        <Text style={styles.campaignSub}>Dynamic Ad Insertion (Mid-Roll)</Text>
-
+      {!!error && <Text style={styles.errorText}>{error}</Text>}
+      {campaigns.map((campaign) => <View key={campaign.id} style={styles.campaignCard}>
+        <View style={styles.campaignHeaderRow}><Text style={styles.campaignTitle}>{campaign.campaignName}</Text><Text style={styles.badgeWarningText}>{campaign.status}</Text></View>
+        <Text style={styles.campaignSub}>Audience: {campaign.targetTier}</Text>
         <View style={styles.paramGrid}>
-          <View style={styles.paramRow}>
-            <Text style={styles.paramLabel}>Geography:</Text>
-            <Text style={styles.paramValue}>KL, Selangor, Penang</Text>
-          </View>
-          <View style={styles.paramRow}>
-            <Text style={styles.paramLabel}>Audience:</Text>
-            <Text style={styles.paramValue}>Free Viewers</Text>
-          </View>
-          <View style={styles.paramRow}>
-            <Text style={styles.paramLabel}>Budget:</Text>
-            <Text style={styles.paramValue}>$12.00 CPM</Text>
-          </View>
+          <View style={styles.paramRow}><Text style={styles.paramLabel}>Remaining budget</Text><Text style={styles.paramValue}>RM {Number(campaign.remainingBudget).toFixed(2)}</Text></View>
+          <View style={styles.paramRow}><Text style={styles.paramLabel}>CPM</Text><Text style={styles.paramValue}>RM {Number(campaign.cpmRate).toFixed(2)}</Text></View>
+          <View style={styles.paramRow}><Text style={styles.paramLabel}>Served impressions</Text><Text style={styles.paramValue}>{campaign.impressions}</Text></View>
         </View>
-
-        {/* 3 Metrics */}
-        <View style={styles.statColumnsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>850K</Text>
-            <Text style={styles.statKey}>Impressions</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>88%</Text>
-            <Text style={styles.statKey}>Completion</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>3.4%</Text>
-            <Text style={styles.statKey}>CTR</Text>
-          </View>
-        </View>
-      </View>
+      </View>)}
+      {!error && campaigns.length === 0 && <Text style={styles.screenSubTitle}>No campaigns have been submitted from this account.</Text>}
     </ScrollView>
   );
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView({ onCheckout, onSupport }: { onCheckout: () => void; onSupport: () => void }) {
-  const [selectedPlan, setSelectedPlan] = useState('Annual VIP Plan');
+function ProfileTabView({ profile, onSupport, onRefreshProfile, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onRefreshProfile: () => Promise<void>; onSignOut: () => void }) {
+  const [subscription, setSubscription] = useState<Awaited<ReturnType<typeof getCurrentSubscription>>>(null);
+  const [message, setMessage] = useState('');
+  const [busyPlan, setBusyPlan] = useState<'VIP_MONTHLY' | 'VIP_YEARLY' | null>(null);
+
+  async function refreshMembership() {
+    try {
+      setSubscription(await getCurrentSubscription());
+      await onRefreshProfile();
+      setMessage('Membership status refreshed.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to refresh membership.');
+    }
+  }
+
+  async function beginCheckout(plan: 'VIP_MONTHLY' | 'VIP_YEARLY') {
+    setBusyPlan(plan);
+    setMessage('');
+    try {
+      const checkout = await createVipCheckout(plan);
+      await Linking.openURL(checkout.paymentUrl);
+      setMessage('Complete payment in Billplz, return here, then refresh membership status.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to start checkout.');
+    } finally {
+      setBusyPlan(null);
+    }
+  }
+
+  useEffect(() => {
+    getCurrentSubscription().then(setSubscription).catch((error) => setMessage(error instanceof Error ? error.message : 'Unable to load membership.'));
+  }, []);
+
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
-      {/* Profile Header */}
       <View style={styles.profileUserRow}>
         <View style={styles.avatarCircle}>
-          <Text style={styles.avatarLetter}>A</Text>
+          <Text style={styles.avatarLetter}>{profile.name.slice(0, 1).toUpperCase()}</Text>
         </View>
         <View style={{ marginLeft: 14 }}>
-          <Text style={styles.profileName}>Aleeya Rahman</Text>
-          <Text style={styles.profileEmail}>VIP Member • aleeya@email.com</Text>
+          <Text style={styles.profileName}>{profile.name}</Text>
+          <Text style={styles.profileEmail}>{profile.email}</Text>
         </View>
       </View>
 
-      <Text style={styles.vipHeaderCentered}>VIP Profile</Text>
-      <Text style={styles.vipSubCentered}>Ad-free • 4K quality • All episodes</Text>
-
-      {/* Plan 1: Annual */}
-      <TouchableOpacity style={[styles.planCard, selectedPlan === 'Annual VIP Plan' && styles.planCardActive]} onPress={() => { setSelectedPlan('Annual VIP Plan'); onCheckout(); }}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.planTitle}>Annual VIP Plan</Text>
-          <Text style={styles.planBadgeText}>Save 33% ⭐ Most popular</Text>
-        </View>
-        <Text style={styles.planPrice}>RM 119.90/yr</Text>
+      <View style={styles.metricCard}>
+        <Text style={styles.metricCardLabel}>Membership</Text>
+        <Text style={styles.metricBigAmount}>{profile.isVip ? 'VIP' : 'Free'}</Text>
+        <Text style={styles.metricSubInfo}>{subscription ? `${subscription.planCode.replace('_', ' ')} • ${subscription.status}` : 'No subscription record'}</Text>
+        {subscription?.renewsAt && <Text style={styles.metricSubInfo}>Renews {new Date(subscription.renewsAt).toLocaleDateString()}</Text>}
+      </View>
+      <Text style={[styles.sectionHeaderTitle, { marginTop: 22 }]}>VIP membership</Text>
+      <TouchableOpacity style={styles.planCard} disabled={busyPlan !== null} onPress={() => beginCheckout('VIP_MONTHLY')}>
+        <View style={{ flex: 1 }}><Text style={styles.planTitle}>Monthly</Text><Text style={styles.planSub}>Billplz checkout</Text></View>
+        <Text style={styles.planPrice}>RM 14.90</Text>
       </TouchableOpacity>
-
-      {/* Plan 2: Monthly */}
-      <TouchableOpacity style={[styles.planCard, selectedPlan === 'Monthly VIP Plan' && styles.planCardActive]} onPress={() => { setSelectedPlan('Monthly VIP Plan'); onCheckout(); }}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.planTitle}>Monthly VIP Plan</Text>
-          <Text style={styles.planSub}>Cancel anytime</Text>
-        </View>
-        <Text style={styles.planPrice}>RM 14.90/mo</Text>
+      <TouchableOpacity style={styles.planCard} disabled={busyPlan !== null} onPress={() => beginCheckout('VIP_YEARLY')}>
+        <View style={{ flex: 1 }}><Text style={styles.planTitle}>Annual</Text><Text style={styles.planSub}>Billplz checkout</Text></View>
+        <Text style={styles.planPrice}>RM 119.90</Text>
       </TouchableOpacity>
-
-      {/* Referral Card */}
-      <View style={styles.referralCard}>
-        <Text style={styles.referralTitle}>Friend Referral Program</Text>
-        <Text style={styles.referralCode}>Share code <Text style={{ color: COLORS.cyan, fontWeight: '700' }}>ALEEYA360</Text></Text>
-        <TouchableOpacity style={styles.whatsappBtn} onPress={() => Linking.openURL('whatsapp://send?text=Join%20me%20on%20Global%20Station%20with%20code%20ALEEYA360').catch(() => Alert.alert('WhatsApp unavailable', 'Install WhatsApp to share your referral code.'))}>
-          <Text style={styles.whatsappBtnText}>📲 Share to WhatsApp</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Support Card */}
-      <View style={styles.supportCard}>
-        <Text style={styles.supportHeader}>Support Ticket #1084</Text>
-        <Text style={styles.supportSub}>VIP playback assistance • Open</Text>
-        <TouchableOpacity style={{ marginTop: 8 }} onPress={onSupport}>
-          <Text style={styles.contactSupportLink}>Need help? Contact Support</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busyPlan !== null} onPress={refreshMembership}>
+        <Text style={styles.secondaryFlowText}>{busyPlan ? 'Opening checkout...' : 'Refresh membership status'}</Text>
+      </TouchableOpacity>
+      {!!message && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{message}</Text>}
+      <TouchableOpacity style={[styles.secondaryFlowBtn, { marginTop: 18 }]} onPress={onSupport}>
+        <Text style={styles.secondaryFlowText}>Contact support</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={[styles.secondaryFlowBtn, { marginTop: 24 }]} onPress={onSignOut}>
+        <Text style={styles.secondaryFlowText}>Sign out</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -621,6 +548,42 @@ function FlowField({ label, value, multiline = false }: { label: string; value: 
   return <View style={styles.flowField}><Text style={styles.flowLabel}>{label}</Text><TextInput value={value} editable={false} multiline={multiline} style={[styles.flowInput, multiline && styles.flowTextArea]} placeholderTextColor={COLORS.textDim} /></View>;
 }
 
+function AdBreak({ onComplete }: { onComplete: () => void }) {
+  const [ad, setAd] = useState<AdPayload | null>(null);
+  const [secondsUntilSkip, setSecondsUntilSkip] = useState(5);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    let active = true;
+    getAdPayload().then((payload) => {
+      if (!active) return;
+      if (!payload) onCompleteRef.current();
+      else setAd(payload);
+    }).catch(() => active && onCompleteRef.current());
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!ad || secondsUntilSkip <= 0) return;
+    const timer = setTimeout(() => setSecondsUntilSkip((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [ad, secondsUntilSkip]);
+
+  if (!ad) return <View pointerEvents="none" style={StyleSheet.absoluteFill} />;
+  return <View style={StyleSheet.absoluteFill}>
+    <Video source={{ uri: ad.creativeVideoUrl }} paused={false} controls={false} resizeMode="contain" style={StyleSheet.absoluteFill} onEnd={onComplete} onError={onComplete} />
+    <View style={[styles.adCard, { position: 'absolute', left: 16, right: 16, bottom: 16 }]}>
+      <View style={styles.adHeaderRow}><View style={styles.daiBadge}><Text style={styles.daiBadgeText}>SPONSORED</Text></View><Text style={styles.adRemaining}>{secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Ad'}</Text></View>
+      <Text style={styles.adTitle}>{ad.title}</Text>
+      <View style={styles.adActionRow}>
+        {ad.clickThroughUrl && <TouchableOpacity onPress={() => Linking.openURL(ad.clickThroughUrl!).catch(() => Alert.alert('Unable to open link', 'The advertiser link could not be opened.'))}><Text style={styles.learnMoreText}>Visit advertiser</Text></TouchableOpacity>}
+        {secondsUntilSkip === 0 && <TouchableOpacity style={styles.skipBtn} onPress={onComplete}><Text style={styles.skipBtnText}>Skip ad</Text></TouchableOpacity>}
+      </View>
+    </View>
+  </View>;
+}
+
 function PayoutScreen({ onBack }: { onBack: () => void }) {
   return <View style={styles.flowScreen}><FlowHeader title="Payout Gateway" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
     <Text style={styles.screenMainTitle}>Payout Gateway</Text><Text style={styles.screenSubTitle}>Withdraw your creator earnings</Text>
@@ -631,18 +594,114 @@ function PayoutScreen({ onBack }: { onBack: () => void }) {
 }
 
 function UploadScreen({ onBack }: { onBack: () => void }) {
-  return <View style={styles.flowScreen}><FlowHeader title="Upload New Video" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
-    <Text style={styles.screenMainTitle}>Upload New Video</Text><Text style={styles.screenSubTitle}>Submit an episode for review</Text>
-    <FlowField label="Video title" value="Episode 6: The Silent Contract" /><FlowField label="Drama / series" value="Thorns of the Heart: Season 2" /><FlowField label="Episode number" value="6" /><FlowField label="Synopsis" value="A new contract changes everything for the production team." multiline /><FlowField label="Video package" value="1080p HLS • 42:15" />
-    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Upload submitted', 'Your video is now in review.')}><Text style={styles.cyanPrimaryBtnText}>Submit for Review</Text></TouchableOpacity>
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [posterUrl, setPosterUrl] = useState('');
+  const [genre, setGenre] = useState('');
+  const [category, setCategory] = useState('');
+  const [episodeTitle, setEpisodeTitle] = useState('');
+  const [durationSeconds, setDurationSeconds] = useState('');
+  const [contentType, setContentType] = useState<'MOVIE' | 'SERIES'>('SERIES');
+  const [isExclusiveVip, setIsExclusiveVip] = useState(false);
+  const [video, setVideo] = useState<{ path: string; name: string; size: number } | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function chooseVideo() {
+    setNotice('');
+    try {
+      const [picked] = await pick({ type: [types.video], mode: 'import' });
+      if (!picked.name || !picked.size || picked.type !== 'video/mp4' || !picked.name.toLowerCase().endsWith('.mp4')) {
+        throw new Error('Choose a non-empty MP4 video file.');
+      }
+      const [copy] = await keepLocalCopy({ files: [{ uri: picked.uri, fileName: picked.name }], destination: 'cachesDirectory' });
+      if (copy.status !== 'success') throw new Error(copy.copyError || 'Unable to access the selected video.');
+      setVideo({ path: copy.localUri.replace(/^file:\/\//, ''), name: picked.name, size: picked.size });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to select video.');
+    }
+  }
+
+  async function submit() {
+    if (!video) { setNotice('Select an MP4 video first.'); return; }
+    if (!title.trim() || !description.trim() || !posterUrl.trim() || !genre.trim() || !category.trim() || !episodeTitle.trim() || Number(durationSeconds) <= 0) {
+      setNotice('Complete all content details before submitting.');
+      return;
+    }
+    setBusy(true);
+    setNotice('');
+    setProgress(0);
+    try {
+      const upload = await createCreatorUpload(video.size);
+      const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
+        .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, Math.round(written / Math.max(1, total) * 100))));
+      if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
+      await submitCreatorContent({ title, contentType, description, posterUrl, rating: 'P13', genre, category, episodeTitle, durationSeconds: Number(durationSeconds), mediaKey: upload.objectKey, isExclusiveVip });
+      Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
+      onBack();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to upload this submission.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <View style={styles.flowScreen}><FlowHeader title="Upload content" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Submit a video</Text>
+    <Text style={styles.screenSubTitle}>MP4 is stored privately in S3. Admin approval is required before viewers can access it.</Text>
+    <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={chooseVideo}><Text style={styles.secondaryFlowText}>{video ? `${video.name} • ${(video.size / 1048576).toFixed(1)} MB` : 'Choose MP4 video'}</Text></TouchableOpacity>
+    <View style={styles.heroBtnRow}>{(['SERIES', 'MOVIE'] as const).map((type) => <TouchableOpacity key={type} style={[styles.chip, contentType === type && styles.chipActive]} onPress={() => setContentType(type)}><Text style={[styles.chipText, contentType === type && styles.chipTextActive]}>{type}</Text></TouchableOpacity>)}</View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Title</Text><TextInput value={title} onChangeText={setTitle} style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Episode title</Text><TextInput value={episodeTitle} onChangeText={setEpisodeTitle} style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Synopsis</Text><TextInput value={description} onChangeText={setDescription} style={[styles.flowInput, styles.flowTextArea]} multiline textAlignVertical="top" /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Poster image URL (HTTPS)</Text><TextInput value={posterUrl} onChangeText={setPosterUrl} style={styles.flowInput} autoCapitalize="none" keyboardType="url" /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Genre</Text><TextInput value={genre} onChangeText={setGenre} style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Category</Text><TextInput value={category} onChangeText={setCategory} style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Duration (seconds)</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} style={styles.flowInput} keyboardType="number-pad" /></View>
+    <TouchableOpacity style={styles.secondaryFlowBtn} onPress={() => setIsExclusiveVip(!isExclusiveVip)}><Text style={styles.secondaryFlowText}>{isExclusiveVip ? 'VIP exclusive: on' : 'VIP exclusive: off'}</Text></TouchableOpacity>
+    {busy && <Text style={styles.screenSubTitle}>Uploading {progress}%</Text>}
+    {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
+    <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busy} onPress={submit}><Text style={styles.cyanPrimaryBtnText}>{busy ? 'Uploading...' : 'Upload and submit for review'}</Text></TouchableOpacity>
   </ScrollView></View>;
 }
 
 function CampaignScreen({ onBack }: { onBack: () => void }) {
-  return <View style={styles.flowScreen}><FlowHeader title="Create Ad Campaign" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
-    <Text style={styles.screenMainTitle}>Create Ad Campaign</Text><Text style={styles.screenSubTitle}>Launch a dynamic mid-roll campaign</Text>
-    <FlowField label="Campaign name" value="Clean Energy EV Launch - Q3" /><FlowField label="Target geography" value="KL, Selangor, Penang" /><FlowField label="Audience" value="Free viewers" /><FlowField label="Budget" value="$12.00 CPM" /><FlowField label="Ad creative" value="EV launch 30s video" />
-    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Campaign created', 'Your campaign is ready for review.')}><Text style={styles.cyanPrimaryBtnText}>Launch Campaign</Text></TouchableOpacity>
+  const [campaignName, setCampaignName] = useState('');
+  const [creativeVideoUrl, setCreativeVideoUrl] = useState('');
+  const [clickThroughUrl, setClickThroughUrl] = useState('');
+  const [cpmRate, setCpmRate] = useState('');
+  const [totalBudget, setTotalBudget] = useState('');
+  const [targetTier, setTargetTier] = useState<'ALL' | 'FREE' | 'VIP'>('ALL');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setNotice('');
+    try {
+      await createAdvertiserCampaign({ campaignName, creativeVideoUrl, clickThroughUrl, cpmRate: Number(cpmRate), totalBudget: Number(totalBudget), targetTier });
+      Alert.alert('Campaign submitted', 'The campaign is paused until an administrator activates it.');
+      onBack();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to submit campaign.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <View style={styles.flowScreen}><FlowHeader title="Create campaign" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Create campaign</Text>
+    <Text style={styles.screenSubTitle}>Use HTTPS media and click-through URLs. Submitted campaigns start paused.</Text>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Campaign name</Text><TextInput value={campaignName} onChangeText={setCampaignName} style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Creative MP4 URL</Text><TextInput value={creativeVideoUrl} onChangeText={setCreativeVideoUrl} autoCapitalize="none" keyboardType="url" style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Click-through URL</Text><TextInput value={clickThroughUrl} onChangeText={setClickThroughUrl} autoCapitalize="none" keyboardType="url" style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>CPM rate (MYR)</Text><TextInput value={cpmRate} onChangeText={setCpmRate} keyboardType="decimal-pad" style={styles.flowInput} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Total budget (MYR)</Text><TextInput value={totalBudget} onChangeText={setTotalBudget} keyboardType="decimal-pad" style={styles.flowInput} /></View>
+    <Text style={[styles.flowLabel, { marginTop: 14 }]}>Audience</Text>
+    <View style={styles.heroBtnRow}>{(['ALL', 'FREE', 'VIP'] as const).map((tier) => <TouchableOpacity key={tier} style={[styles.chip, targetTier === tier && styles.chipActive]} onPress={() => setTargetTier(tier)}><Text style={[styles.chipText, targetTier === tier && styles.chipTextActive]}>{tier}</Text></TouchableOpacity>)}</View>
+    {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
+    <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busy} onPress={submit}><Text style={styles.cyanPrimaryBtnText}>{busy ? 'Submitting...' : 'Submit campaign'}</Text></TouchableOpacity>
   </ScrollView></View>;
 }
 
@@ -656,12 +715,48 @@ function CheckoutScreen({ onBack }: { onBack: () => void }) {
 }
 
 function SupportScreen({ onBack }: { onBack: () => void }) {
-  return <View style={styles.flowScreen}><FlowHeader title="Customer Support Center" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
-    <Text style={styles.screenMainTitle}>Customer Support Center</Text><Text style={styles.screenSubTitle}>We usually reply within 10 minutes</Text>
-    <View style={styles.supportChat}><Text style={styles.chatAgent}>Global Station Support</Text><Text style={styles.chatMessage}>Hi Aleeya, how can we help with your VIP playback?</Text></View>
-    <FlowField label="Issue category" value="VIP playback assistance" /><FlowField label="Message" value="I need help continuing my episode." multiline />
-    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Ticket sent', 'Support ticket #1084 has been updated.')}><Text style={styles.cyanPrimaryBtnText}>Send Message</Text></TouchableOpacity>
-    <TouchableOpacity style={styles.secondaryFlowBtn} onPress={() => Linking.openURL('mailto:support@globalstation.example')}><Text style={styles.secondaryFlowText}>Email support</Text></TouchableOpacity>
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [tickets, setTickets] = useState<Awaited<ReturnType<typeof listSupportTickets>>>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  async function loadTickets() {
+    try {
+      setTickets(await listSupportTickets());
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to load support tickets.');
+    }
+  }
+
+  useEffect(() => { loadTickets(); }, []);
+
+  async function submitTicket() {
+    setBusy(true);
+    setNotice('');
+    try {
+      await createSupportTicket({ subject, description, priority: 'NORMAL' });
+      setSubject('');
+      setDescription('');
+      setNotice('Your support request was submitted.');
+      await loadTickets();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to submit support request.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <View style={styles.flowScreen}><FlowHeader title="Customer Support" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
+    <Text style={styles.screenMainTitle}>Contact support</Text>
+    <Text style={styles.screenSubTitle}>Requests are saved to your account.</Text>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Subject</Text><TextInput value={subject} onChangeText={setSubject} style={styles.flowInput} maxLength={200} /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>Message</Text><TextInput value={description} onChangeText={setDescription} style={[styles.flowInput, styles.flowTextArea]} multiline maxLength={5000} textAlignVertical="top" /></View>
+    <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busy} onPress={submitTicket}><Text style={styles.cyanPrimaryBtnText}>{busy ? 'Submitting...' : 'Submit request'}</Text></TouchableOpacity>
+    {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
+    <Text style={[styles.sectionHeaderTitle, { marginTop: 24 }]}>Your requests</Text>
+    {tickets.map((ticket) => <View key={ticket.id} style={styles.pipelineCard}><View style={{ flex: 1 }}><Text style={styles.pipelineTitle}>{ticket.subject}</Text><Text style={styles.pipelineSub}>{ticket.status.replace('_', ' ')} • {new Date(ticket.createdAt).toLocaleDateString()}</Text><Text style={styles.pipelineSub}>{ticket.description}</Text></View></View>)}
+    {!tickets.length && <Text style={styles.screenSubTitle}>No support requests yet.</Text>}
   </ScrollView></View>;
 }
 
