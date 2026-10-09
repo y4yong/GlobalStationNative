@@ -1,5 +1,15 @@
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1';
 
+function getAdminUploadUrl(uploadUrl: string) {
+  const upload = new URL(uploadUrl);
+  const api = new URL(API_URL);
+  if (upload.pathname.startsWith('/api/v1/media/local/') && upload.hostname === '10.0.2.2' && ['localhost', '127.0.0.1'].includes(api.hostname)) {
+    upload.protocol = api.protocol;
+    upload.host = api.host;
+  }
+  return upload.toString();
+}
+
 export interface Session { token: string; role: string; expiresAt: string }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -25,6 +35,7 @@ export async function login(email: string, password: string) {
 export const api = {
   overview: () => request<any>('/admin/overview'),
   content: (status = 'ALL') => request<any[]>(`/admin/content?status=${encodeURIComponent(status)}`),
+  contentDetail: (id: string) => request<any>(`/admin/content/${encodeURIComponent(id)}`),
   users: (filters: { search?: string; role?: string; plan?: string; status?: string } = {}) => {
     const query = new URLSearchParams(Object.entries(filters).filter((entry): entry is [string, string] => Boolean(entry[1])));
     return request<any[]>(`/admin/users${query.size ? `?${query}` : ''}`);
@@ -35,6 +46,8 @@ export const api = {
   telemetry: () => request<any[]>('/admin/telemetry'),
   supportTickets: () => request<any[]>('/admin/support'),
   contentStatus: (id: string, status: string) => request<any>(`/admin/content/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  contentArchive: (id: string, archived: boolean) => request<any>(`/admin/content/${id}/archive`, { method: 'PATCH', body: JSON.stringify({ archived }) }),
+  deleteContent: (id: string) => request<any>(`/admin/content/${id}`, { method: 'DELETE' }),
   createContent: (payload: unknown) => request<any>('/admin/content', { method: 'POST', body: JSON.stringify(payload) }),
   campaignStatus: (id: string, status: string) => request<any>(`/admin/campaigns/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   payoutStatus: (id: string, status: string) => request<any>(`/admin/payouts/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
@@ -44,8 +57,17 @@ export const api = {
   }),
   uploadMediaFile: async (purpose: 'poster' | 'media', file: File) => {
     const upload = await api.createMediaUpload(purpose, file);
-    const response = await fetch(upload.uploadUrl, { method: 'PUT', headers: { 'Content-Type': upload.contentType, ...upload.requiredHeaders }, body: file });
-    if (!response.ok) throw new Error(`File upload failed (${response.status}). Check the S3 bucket CORS configuration.`);
+    const uploadUrl = getAdminUploadUrl(upload.uploadUrl);
+    let response: Response;
+    try {
+      response = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': upload.contentType, ...upload.requiredHeaders }, body: file });
+    } catch {
+      throw new Error(`Could not reach the media upload service at ${new URL(uploadUrl).host}. Confirm the API is running and try again.`);
+    }
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message ?? `File upload failed (${response.status}).`);
+    }
     return upload.objectKey;
   },
 };

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
+import { signAdminPlaybackUrl, signPlaybackUrl } from './mediaStorage.js';
 
 interface AdminRequest extends Request { adminUserId?: string }
 const contentStatuses = ['DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED'] as const;
@@ -26,7 +27,7 @@ export async function adminOverview() {
   const [dramas, users, watch, campaigns, payouts] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'IN_REVIEW')::int AS pending, COUNT(*) FILTER (WHERE status = 'APPROVED')::int AS published FROM content`),
     pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE role = 'CREATOR')::int AS creators, COUNT(*) FILTER (WHERE role = 'ADVERTISER')::int AS advertisers FROM users`),
-    pool.query(`SELECT COUNT(*)::int AS sessions, COALESCE(SUM(watch_seconds), 0)::int AS "watchSeconds", COUNT(DISTINCT user_id)::int AS "activeUsers" FROM watch_logs WHERE created_at >= now() - interval '30 days'`),
+    pool.query(`SELECT COUNT(DISTINCT session_uid)::int AS sessions, COALESCE(SUM(watch_seconds), 0)::int AS "watchSeconds", COUNT(DISTINCT user_id)::int AS "activeUsers" FROM watch_logs WHERE created_at >= now() - interval '30 days'`),
     pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active FROM ad_campaigns`),
     pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'PENDING')::int AS pending, COALESCE(SUM(amount) FILTER (WHERE status = 'PENDING'), 0)::float AS "pendingAmount" FROM payout_requests`),
   ]);
@@ -34,13 +35,49 @@ export async function adminOverview() {
 }
 
 export async function adminContent(status?: string) {
-  const values: string[] = []; const where = status && status !== 'ALL' ? `WHERE c.status = $1` : ''; if (where) values.push(status!);
-  const { rows } = await pool.query(`SELECT c.id, c.title, c.content_type AS "contentType", c.description, c.poster_url AS "posterUrl", c.rating, c.genre, c.category, c.status, c.is_featured AS "isFeatured", c.is_exclusive_vip AS "isExclusiveVip", c.created_at AS "createdAt", COUNT(e.id)::int AS "episodeCount" FROM content c LEFT JOIN episodes e ON e.content_id = c.id ${where} GROUP BY c.id ORDER BY c.created_at DESC`, values);
+  const values: string[] = [];
+  let where = '';
+  if (status === 'ARCHIVED') where = 'WHERE c.is_archived = TRUE';
+  else if (status && status !== 'ALL') { where = 'WHERE c.status = $1 AND c.is_archived = FALSE'; values.push(status); }
+  const { rows } = await pool.query(`SELECT c.id, c.title, c.content_type AS "contentType", c.description, c.rating, c.genre, c.category, c.status, c.is_archived AS "isArchived", c.is_featured AS "isFeatured", c.is_exclusive_vip AS "isExclusiveVip", c.created_at AS "createdAt", u.name AS "creatorName", u.email AS "creatorEmail", COUNT(e.id)::int AS "episodeCount" FROM content c LEFT JOIN episodes e ON e.content_id = c.id LEFT JOIN users u ON u.id = c.created_by ${where} GROUP BY c.id, u.id ORDER BY c.created_at DESC`, values);
   return rows;
 }
 
+export async function adminContentDetail(id: string) {
+  const { rows } = await pool.query(`
+    SELECT c.id, c.title, c.content_type AS "contentType", c.description,
+      c.poster_url AS "posterReference", c.rating, c.genre, c.category,
+      c.status, c.is_featured AS "isFeatured", c.is_exclusive_vip AS "isExclusiveVip",
+      c.is_archived AS "isArchived",
+      c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+      u.id AS "creatorId", u.name AS "creatorName", u.email AS "creatorEmail",
+      COALESCE(json_agg(json_build_object(
+        'id', e.id, 'episodeNumber', e.episode_number, 'title', e.title,
+        'durationSeconds', e.duration_seconds, 'mediaReference', e.hls_manifest_url,
+        'isFreePreview', e.is_free_preview
+      ) ORDER BY e.episode_number) FILTER (WHERE e.id IS NOT NULL), '[]') AS episodes
+    FROM content c
+    LEFT JOIN users u ON u.id = c.created_by
+    LEFT JOIN episodes e ON e.content_id = c.id
+    WHERE c.id = $1
+    GROUP BY c.id, u.id
+  `, [id]);
+  const content = rows[0];
+  if (!content) throw Object.assign(new Error('Content not found.'), { statusCode: 404 });
+  return {
+    ...content,
+    posterUrl: content.posterReference ? signAdminPlaybackUrl(content.posterReference) : null,
+    episodes: content.episodes.map((episode: { mediaReference: string; [key: string]: unknown }) => ({
+      ...episode,
+      mediaUrl: signAdminPlaybackUrl(episode.mediaReference),
+      mediaReference: undefined,
+    })),
+  };
+}
+
 export async function createContent(input: unknown, userId?: string) {
-  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine((value) => value.startsWith('s3://') || value.startsWith('https://')), rating: z.enum(contentRatings), genre: z.enum(contentGenres), category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine((value) => value.startsWith('s3://') || value.startsWith('https://')), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
+  const isAllowedMediaReference = (value: string) => value.startsWith('s3://') || value.startsWith('https://') || (config.MEDIA_STORAGE_DRIVER === 'local' && value.startsWith('http://'));
+  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine(isAllowedMediaReference), rating: z.enum(contentRatings), genre: z.enum(contentGenres), category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine(isAllowedMediaReference), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
   const client = await pool.connect();
   try { await client.query('BEGIN'); const origin = data.latitude !== undefined && data.longitude !== undefined ? `SRID=4326;POINT(${data.longitude} ${data.latitude})` : null; const content = await client.query<{ id: string }>('INSERT INTO content (title, content_type, description, poster_url, rating, genre, category, is_exclusive_vip, status, origin, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,\'APPROVED\',ST_GeogFromText($9),$10) RETURNING id', [data.title, data.contentType, data.description, data.posterUrl, data.rating, data.genre, data.category, data.isExclusiveVip, origin, userId ?? null]); await client.query('INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1, 1, $2, $3, $4, true)', [content.rows[0].id, data.episodeTitle, data.durationSeconds, data.hlsManifestUrl]); await client.query('COMMIT'); await audit(userId, 'CONTENT_CREATED', 'CONTENT', content.rows[0].id, { contentType: data.contentType }); return { id: content.rows[0].id }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
@@ -113,7 +150,7 @@ export async function adminSetUserPlan(id: string, plan: string, confirmation: s
 }
 export async function adminCampaigns() { return (await pool.query('SELECT id, campaign_name AS "campaignName", creative_video_url AS "creativeVideoUrl", cpm_rate AS "cpmRate", total_budget AS "totalBudget", remaining_budget AS "remainingBudget", target_tier AS "targetTier", status, created_at AS "createdAt" FROM ad_campaigns ORDER BY created_at DESC LIMIT 200')).rows; }
 export async function updateCampaignStatus(id: string, status: string, userId?: string) { const parsed = z.enum(campaignStatuses).parse(status); const result = await pool.query('UPDATE ad_campaigns SET status = $1 WHERE id = $2', [parsed, id]); if (!result.rowCount) throw Object.assign(new Error('Campaign not found'), { statusCode: 404 }); await audit(userId, `CAMPAIGN_${parsed}`, 'CAMPAIGN', id, { status: parsed }); return { id, status: parsed }; }
-export async function adminTelemetry() { return (await pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, COUNT(*)::int AS sessions, COALESCE(SUM(watch_seconds), 0)::int AS "watchSeconds", COUNT(DISTINCT user_id)::int AS viewers FROM watch_logs WHERE created_at >= now() - interval '14 days' GROUP BY created_at::date ORDER BY day`)).rows; }
+export async function adminTelemetry() { return (await pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, COUNT(DISTINCT session_uid)::int AS sessions, COALESCE(SUM(watch_seconds), 0)::int AS "watchSeconds", COUNT(DISTINCT user_id)::int AS viewers FROM watch_logs WHERE created_at >= now() - interval '14 days' GROUP BY created_at::date ORDER BY day`)).rows; }
 export async function adminPayouts() { return (await pool.query('SELECT p.id, p.amount, p.status, p.requested_at AS "requestedAt", p.processed_at AS "processedAt", u.name AS "creatorName", u.email AS "creatorEmail" FROM payout_requests p JOIN users u ON u.id = p.creator_id ORDER BY p.requested_at DESC LIMIT 200')).rows; }
 export async function updatePayoutStatus(id: string, status: string, userId?: string) { const parsed = z.enum(payoutStatuses).parse(status); const result = await pool.query('UPDATE payout_requests SET status = $1, processed_at = CASE WHEN $1 IN (\'APPROVED\',\'REJECTED\',\'PAID\') THEN now() ELSE NULL END, processed_by = $2 WHERE id = $3', [parsed, userId ?? null, id]); if (!result.rowCount) throw Object.assign(new Error('Payout not found'), { statusCode: 404 }); await audit(userId, `PAYOUT_${parsed}`, 'PAYOUT', id, { status: parsed }); return { id, status: parsed }; }
 export async function adminSupportTickets() { return (await pool.query('SELECT t.id, t.subject, t.description, t.priority, t.status, t.created_at AS "createdAt", u.name AS "userName", u.email AS "userEmail" FROM support_tickets t LEFT JOIN users u ON u.id = t.user_id ORDER BY CASE WHEN t.status IN (\'OPEN\',\'IN_PROGRESS\') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200')).rows; }

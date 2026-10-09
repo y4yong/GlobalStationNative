@@ -9,7 +9,9 @@ async function applySql(sql: string) {
     try {
       await pool.query(statement);
     } catch (error) {
-      if (!['42P07', '42710'].includes((error as { code?: string }).code ?? '')) throw error;
+      const code = (error as { code?: string }).code ?? '';
+      const incompatibleExistingView = code === '42P16' && /^CREATE\s+OR\s+REPLACE\s+VIEW/i.test(statement);
+      if (!['42P07', '42710'].includes(code) && !incompatibleExistingView) throw error;
     }
   }
 }
@@ -20,8 +22,29 @@ const schemaSql = completeSql.split('-- Development seed users.')[0];
 if (schemaSql === completeSql) throw new Error('Development seed boundary is missing from complete_globalstation.sql');
 await applySql(schemaSql);
 
+const { rows: regionTypeRows } = await pool.query<{ udt_name: string }>(`
+  SELECT udt_name FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'content' AND column_name = 'available_regions'
+`);
+if (regionTypeRows[0]?.udt_name === 'geography') {
+  await pool.query('CREATE INDEX IF NOT EXISTS content_regions_gist_idx ON content USING GIST(available_regions)');
+}
+const { rows: locationTypeRows } = await pool.query<{ udt_name: string }>(`
+  SELECT udt_name FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'watch_logs' AND column_name = 'location'
+`);
+if (locationTypeRows[0]?.udt_name === 'geography') {
+  await pool.query('CREATE INDEX IF NOT EXISTS watch_logs_location_gist_idx ON watch_logs USING GIST(location)');
+}
+
 const integrationsPath = fileURLToPath(new URL('../sql/004_integrations.sql', import.meta.url));
 await applySql(await readFile(path.resolve(integrationsPath), 'utf8'));
+
+const rolesPath = fileURLToPath(new URL('../sql/005_user_roles.sql', import.meta.url));
+await applySql(await readFile(path.resolve(rolesPath), 'utf8'));
+
+const contentArchivePath = fileURLToPath(new URL('../sql/006_content_archive.sql', import.meta.url));
+await applySql(await readFile(path.resolve(contentArchivePath), 'utf8'));
 
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

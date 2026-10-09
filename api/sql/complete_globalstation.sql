@@ -17,6 +17,16 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role VARCHAR(20) NOT NULL CHECK (role IN ('CREATOR', 'ADVERTISER')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, role)
+);
+INSERT INTO user_roles (user_id, role)
+SELECT id, role FROM users WHERE role IN ('CREATOR', 'ADVERTISER')
+ON CONFLICT (user_id, role) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS device_fingerprints (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -40,6 +50,7 @@ CREATE TABLE IF NOT EXISTS content (
   language_code VARCHAR(10) NOT NULL DEFAULT 'ms',
   is_featured BOOLEAN NOT NULL DEFAULT FALSE,
   is_exclusive_vip BOOLEAN NOT NULL DEFAULT FALSE,
+  is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED')),
   origin geography(Point, 4326),
   available_regions geography(MultiPolygon, 4326),
@@ -47,6 +58,7 @@ CREATE TABLE IF NOT EXISTS content (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE content ADD COLUMN IF NOT EXISTS origin geography(Point, 4326);
 
 CREATE TABLE IF NOT EXISTS content_rights (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,10 +199,8 @@ CREATE TABLE IF NOT EXISTS admin_audit_logs (
 
 CREATE INDEX IF NOT EXISTS content_status_created_idx ON content(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS content_origin_gist_idx ON content USING GIST(origin);
-CREATE INDEX IF NOT EXISTS content_regions_gist_idx ON content USING GIST(available_regions);
 CREATE INDEX IF NOT EXISTS episodes_content_idx ON episodes(content_id, episode_number);
 CREATE INDEX IF NOT EXISTS watch_logs_created_idx ON watch_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS watch_logs_location_gist_idx ON watch_logs USING GIST(location);
 CREATE INDEX IF NOT EXISTS audit_entity_idx ON admin_audit_logs(entity_type, entity_id, created_at DESC);
 
 CREATE OR REPLACE VIEW published_catalog AS
@@ -220,23 +230,6 @@ VALUES
   ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
-INSERT INTO content (id, title, content_type, description, poster_url, backdrop_url, rating, genre, category, language_code, is_featured, is_exclusive_vip, status, origin, created_by)
-VALUES
-  ('10000000-0000-0000-0000-000000000001', 'Thorns of the Heart: Season 2', 'SERIES', 'Two wounded souls fight betrayal, unspoken secrets, and high-society sabotage.', 'https://placehold.co/600x900/1e382b/f3f2ec?text=Thorns', 'https://placehold.co/1600x900/284c38/f3f2ec?text=Thorns', 'P13', 'Romance Drama', 'Romance', 'ms', TRUE, TRUE, 'APPROVED', ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography, '00000000-0000-0000-0000-000000000002'),
-  ('10000000-0000-0000-0000-000000000002', 'Central Precinct', 'SERIES', 'A tactical unit investigates an elusive syndicate operating under the police radar.', 'https://placehold.co/600x900/23343d/f3f2ec?text=Central', 'https://placehold.co/1600x900/294651/f3f2ec?text=Central', '18', 'Crime Unit', 'Action', 'ms', TRUE, FALSE, 'APPROVED', ST_SetSRID(ST_MakePoint(103.8198, 1.3521), 4326)::geography, '00000000-0000-0000-0000-000000000002'),
-  ('10000000-0000-0000-0000-000000000003', 'Terminal Love', 'MOVIE', 'Two strangers meet at a terminal filled with old memories.', 'https://placehold.co/600x900/583e3a/f3f2ec?text=Terminal', 'https://placehold.co/1600x900/674942/f3f2ec?text=Terminal', 'P13', 'Romance Drama', 'Romance', 'ms', FALSE, TRUE, 'APPROVED', ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography, '00000000-0000-0000-0000-000000000001'),
-  ('10000000-0000-0000-0000-000000000004', 'The Last Signal', 'MOVIE', 'A communications engineer follows one impossible transmission across the peninsula.', 'https://placehold.co/600x900/35424a/f3f2ec?text=Signal', 'https://placehold.co/1600x900/435763/f3f2ec?text=Signal', 'P13', 'Science Fiction', 'Feature', 'en', FALSE, FALSE, 'IN_REVIEW', ST_SetSRID(ST_MakePoint(100.3327, 5.4141), 4326)::geography, '00000000-0000-0000-0000-000000000002')
-ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, status = EXCLUDED.status, updated_at = now();
-
-INSERT INTO episodes (id, content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview)
-VALUES
-  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 1, 'The Broken Oath', 2520, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', FALSE),
-  ('20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 2, 'Silent Tears', 2700, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', FALSE),
-  ('20000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 3, 'Shadows of Betrayal', 2400, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', FALSE),
-  ('20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000002', 1, 'Code Red', 2640, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', TRUE),
-  ('20000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000003', 1, 'Last Platform', 2400, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', FALSE),
-  ('20000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000004', 1, 'The Transmission', 3000, 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', TRUE)
-ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
 VALUES ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'VIP_MONTHLY', 'ACTIVE', now() - interval '12 days', now() + interval '18 days')

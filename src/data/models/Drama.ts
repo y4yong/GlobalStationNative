@@ -14,6 +14,7 @@ export interface DramaItem {
   genre: string;
   rating: string;
   badge: 'VIP' | 'FREE';
+  posterUrl?: string;
   progress?: number;
   timeLeft?: string;
   tag?: string;

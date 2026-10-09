@@ -3,14 +3,17 @@ import express from 'express';
 import helmet from 'helmet';
 import { z } from 'zod';
 import { config } from './config.js';
-import { getAuthenticatedUser, login, loginSchema, register, registerSchema, requireAuthenticated } from './auth.js';
+import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
+import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
+import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
 import { listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
-import { createAdminUpload, createCreatorUpload, signPlaybackUrl, verifyAdminUpload, verifyCreatorUpload } from './mediaStorage.js';
+import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
 import { createVipCheckout, currentSubscription, processBillplzCallback } from './billing.js';
 import {
   adminCampaigns,
   adminContent,
+  adminContentDetail,
   createContent,
   adminOverview,
   adminPayouts,
@@ -36,6 +39,21 @@ app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.get('/health', (_request, response) => {
   response.json({ status: 'ok', service: 'globalstation-api' });
 });
+
+if (config.MEDIA_STORAGE_DRIVER === 'local') {
+  app.use('/uploads', (_request, response, next) => {
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  }, express.static(getMediaStorageDirectory()));
+  app.put('/api/v1/media/local/:token', async (request, response, next) => {
+    try {
+      await storeLocalUpload(request.params.token, request, request.header('content-type') ?? '', request.header('content-length'));
+      response.sendStatus(201);
+    } catch (error) {
+      next(error);
+    }
+  });
+}
 
 app.get('/api/v1/dramas', async (_request, response, next) => {
   try {
@@ -70,7 +88,7 @@ app.post('/api/v1/auth/register', async (request, response, next) => {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'A name, valid email, and password of at least 8 characters are required.' });
       return;
     }
-    const result = await register(input.data.name, input.data.email, input.data.password);
+    const result = await register(input.data.name, input.data.email, input.data.password, input.data.role);
     if (!result) {
       response.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'An account already exists for this email.' });
       return;
@@ -81,14 +99,66 @@ app.post('/api/v1/auth/register', async (request, response, next) => {
   }
 });
 
+app.post('/api/v1/auth/upgrade-role', requireAuthenticated, async (request, response, next) => {
+  try {
+    const input = z.object({ role: z.enum(['CREATOR', 'ADVERTISER']) }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid account role.' });
+      return;
+    }
+
+    const user = getAuthenticatedUser(request);
+    const result = await upgradeRole(user.id, input.data.role);
+    if (!result) {
+      response.status(409).json({ error: 'ROLE_UPDATE_FAILED', message: 'This account could not be upgraded right now.' });
+      return;
+    }
+
+    response.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/v1/auth/me', requireAuthenticated, (request, response) => {
   response.json(getAuthenticatedUser(request));
+});
+
+app.get('/api/v1/creator/dashboard', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'CREATOR')) {
+      response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
+      return;
+    }
+    response.json(await creatorOverview(user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/creator/payout-requests', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'CREATOR')) {
+      response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
+      return;
+    }
+    const input = z.object({ amount: z.number().positive().max(1_000_000) }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Enter a valid payout amount.' });
+      return;
+    }
+    response.status(201).json(await requestCreatorPayout(user.id, input.data.amount));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/v1/creator/uploads', requireAuthenticated, async (request, response, next) => {
   try {
     const user = getAuthenticatedUser(request);
-    if (user.role !== 'CREATOR') {
+    if (!hasRole(user, 'CREATOR')) {
       response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
       return;
     }
@@ -103,10 +173,28 @@ app.post('/api/v1/creator/uploads', requireAuthenticated, async (request, respon
   }
 });
 
+app.post('/api/v1/creator/uploads/poster', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'CREATOR')) {
+      response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
+      return;
+    }
+    const input = z.object({ contentType: z.string(), contentLength: z.number().int().positive() }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A supported poster type and positive file size are required.' });
+      return;
+    }
+    response.status(201).json(await createCreatorPosterUpload(user.id, input.data.contentType, input.data.contentLength));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/v1/creator/submissions', requireAuthenticated, async (request, response, next) => {
   try {
     const user = getAuthenticatedUser(request);
-    if (user.role !== 'CREATOR') {
+    if (!hasRole(user, 'CREATOR')) {
       response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
       return;
     }
@@ -123,9 +211,46 @@ app.get('/api/v1/creator/submissions', requireAuthenticated, async (request, res
   }
 });
 
+app.patch('/api/v1/creator/submissions/:id/archive', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'CREATOR')) {
+      response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
+      return;
+    }
+    const input = z.object({ archived: z.boolean() }).safeParse(request.body);
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!input.success || !id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A content ID and archive state are required.' });
+      return;
+    }
+    response.json(await setContentArchived(id.data, input.data.archived, user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/v1/creator/submissions/:id', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'CREATOR')) {
+      response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
+      return;
+    }
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid content ID is required.' });
+      return;
+    }
+    response.json(await deleteContentPermanently(id.data, user.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, response, next) => {
   const user = getAuthenticatedUser(request);
-  if (user.role !== 'CREATOR') {
+  if (!hasRole(user, 'CREATOR')) {
     response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED' });
     return;
   }
@@ -133,10 +258,10 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     title: z.string().trim().min(2).max(255),
     contentType: z.enum(['MOVIE', 'SERIES']),
     description: z.string().trim().min(10),
-    posterUrl: z.string().url(),
-    rating: z.string().min(1).max(20),
-    genre: z.string().min(1).max(100),
-    category: z.string().min(1).max(100),
+    posterKey: z.string().min(1),
+    rating: z.enum(['U', 'P12', 'P13', '16', '18']),
+    genre: z.enum(['Action', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Horror', 'Romance', 'Science Fiction', 'Thriller']),
+    category: z.enum(['Documentary', 'Film', 'Malay Drama', 'Original Series', 'Korean Drama', 'Variety']),
     episodeTitle: z.string().trim().min(1).max(255),
     durationSeconds: z.number().int().positive(),
     mediaKey: z.string().min(1),
@@ -147,13 +272,16 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     return;
   }
   try {
-    const mediaReference = await verifyCreatorUpload(user.id, input.data.mediaKey);
+    const [posterUrl, mediaReference] = await Promise.all([
+      verifyCreatorPosterUpload(user.id, input.data.posterKey),
+      verifyCreatorUpload(user.id, input.data.mediaKey),
+    ]);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const content = await client.query<{ id: string }>(
         'INSERT INTO content (title, content_type, description, poster_url, rating, genre, category, is_exclusive_vip, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,\'IN_REVIEW\',$9) RETURNING id',
-        [input.data.title, input.data.contentType, input.data.description, input.data.posterUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
+        [input.data.title, input.data.contentType, input.data.description, posterUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
       );
       await client.query(
         'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,1,$2,$3,$4,true)',
@@ -196,7 +324,7 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
       FROM episodes e
       JOIN content c ON c.id = e.content_id
       JOIN users u ON u.id = $2
-      WHERE e.id = $1 AND c.status = 'APPROVED' AND u.status = 'ACTIVE'
+      WHERE e.id = $1 AND c.status = 'APPROVED' AND NOT c.is_archived AND u.status = 'ACTIVE'
     `, [input.data.episodeId, user.id]);
     const episode = rows[0];
     if (!episode) {
@@ -209,6 +337,59 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
     }
 
     response.json({ manifestUrl: signPlaybackUrl(episode.hls_manifest_url) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/streams/progress', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({
+    episodeId: z.string().uuid(),
+    sessionUid: z.string().trim().min(8).max(100),
+    watchSeconds: z.number().int().min(1).max(60),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Valid playback progress is required.' });
+    return;
+  }
+
+  const user = getAuthenticatedUser(request);
+  try {
+    const { rows } = await pool.query(`
+      SELECT e.id FROM episodes e
+      JOIN content c ON c.id = e.content_id
+      WHERE e.id = $1 AND c.status = 'APPROVED'
+        AND (NOT (c.is_exclusive_vip OR NOT e.is_free_preview) OR $2::boolean)
+    `, [input.data.episodeId, user.isVip]);
+    if (!rows[0]) {
+      response.status(404).json({ error: 'EPISODE_NOT_FOUND' });
+      return;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [input.data.sessionUid]);
+      const existing = await client.query<{ id: string }>(
+        'SELECT id FROM watch_logs WHERE session_uid = $1 AND episode_id = $2 ORDER BY id LIMIT 1 FOR UPDATE',
+        [input.data.sessionUid, input.data.episodeId],
+      );
+      if (existing.rows[0]) {
+        await client.query('UPDATE watch_logs SET watch_seconds = watch_seconds + $1 WHERE id = $2', [input.data.watchSeconds, existing.rows[0].id]);
+      } else {
+        await client.query(
+          'INSERT INTO watch_logs (user_id, episode_id, watch_seconds, device_ip, session_uid) VALUES ($1, $2, $3, $4, $5)',
+          [user.id, input.data.episodeId, input.data.watchSeconds, request.ip ?? '127.0.0.1', input.data.sessionUid],
+        );
+      }
+      await client.query('COMMIT');
+      response.sendStatus(204);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     next(error);
   }
@@ -286,10 +467,28 @@ app.post('/api/v1/support/tickets', requireAuthenticated, async (request, respon
   }
 });
 
+app.post('/api/v1/advertiser/uploads', requireAuthenticated, async (request, response, next) => {
+  try {
+    const user = getAuthenticatedUser(request);
+    if (!hasRole(user, 'ADVERTISER')) {
+      response.status(403).json({ error: 'ADVERTISER_ACCESS_REQUIRED' });
+      return;
+    }
+    const input = z.object({ contentLength: z.number().int().positive() }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A positive MP4 file size is required.' });
+      return;
+    }
+    response.status(201).json(await createAdvertiserUpload(user.id, input.data.contentLength));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, response, next) => {
   try {
     const user = getAuthenticatedUser(request);
-    if (user.role !== 'ADVERTISER') {
+    if (!hasRole(user, 'ADVERTISER')) {
       response.status(403).json({ error: 'ADVERTISER_ACCESS_REQUIRED' });
       return;
     }
@@ -311,31 +510,35 @@ app.get('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, re
 app.post('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, response, next) => {
   try {
     const user = getAuthenticatedUser(request);
-    if (user.role !== 'ADVERTISER') {
+    if (!hasRole(user, 'ADVERTISER')) {
       response.status(403).json({ error: 'ADVERTISER_ACCESS_REQUIRED' });
       return;
     }
     const input = z.object({
       campaignName: z.string().trim().min(2).max(150),
-      creativeVideoUrl: z.string().url(),
+      creativeKey: z.string().min(1).optional(),
+      creativeVideoUrl: z.string().url().optional(),
       clickThroughUrl: z.string().url(),
       cpmRate: z.number().positive().max(10000),
       totalBudget: z.number().positive().max(10000000),
       targetTier: z.enum(['ALL', 'FREE', 'VIP']),
-    }).safeParse(request.body);
+    }).refine(value => Boolean(value.creativeKey || value.creativeVideoUrl), { message: 'Upload an MP4 creative.' }).safeParse(request.body);
     if (!input.success) {
-      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a campaign name, HTTPS creative and click URL, CPM, budget, and audience.' });
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a campaign, uploaded MP4, click URL, CPM, budget, and audience.' });
       return;
     }
-    if (![input.data.creativeVideoUrl, input.data.clickThroughUrl].every((value) => value.startsWith('https://'))) {
-      response.status(400).json({ error: 'HTTPS_REQUIRED', message: 'Campaign media and click URLs must use HTTPS.' });
+    if (!input.data.clickThroughUrl.startsWith('https://') || (input.data.creativeVideoUrl && !input.data.creativeVideoUrl.startsWith('https://'))) {
+      response.status(400).json({ error: 'HTTPS_REQUIRED', message: 'Campaign click URLs and external creative URLs must use HTTPS.' });
       return;
     }
+    const creativeVideoUrl = input.data.creativeKey
+      ? await verifyAdvertiserUpload(user.id, input.data.creativeKey)
+      : input.data.creativeVideoUrl!;
     const { rows } = await pool.query<{ id: string; status: string }>(`
       INSERT INTO ad_campaigns (advertiser_id, campaign_name, creative_video_url, click_through_url, cpm_rate, total_budget, remaining_budget, target_tier, status)
       VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'PAUSED')
       RETURNING id, status
-    `, [user.id, input.data.campaignName, input.data.creativeVideoUrl, input.data.clickThroughUrl, input.data.cpmRate, input.data.totalBudget, input.data.targetTier]);
+    `, [user.id, input.data.campaignName, creativeVideoUrl, input.data.clickThroughUrl, input.data.cpmRate, input.data.totalBudget, input.data.targetTier]);
     response.status(201).json(rows[0]);
   } catch (error) {
     next(error);
@@ -403,6 +606,37 @@ app.get('/api/v1/admin/overview', async (_request, response, next) => {
 
 app.get('/api/v1/admin/content', async (request, response, next) => {
   try { response.json(await adminContent(typeof request.query.status === 'string' ? request.query.status : undefined)); } catch (error) { next(error); }
+});
+
+app.patch('/api/v1/admin/content/:id/archive', async (request, response, next) => {
+  try {
+    const input = z.object({ archived: z.boolean() }).safeParse(request.body);
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!input.success || !id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A content ID and archive state are required.' });
+      return;
+    }
+    response.json(await setContentArchived(id.data, input.data.archived, undefined, getAdminUserId(request)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/v1/admin/content/:id', async (request, response, next) => {
+  try {
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid content ID is required.' });
+      return;
+    }
+    response.json(await deleteContentPermanently(id.data, undefined, getAdminUserId(request)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/admin/content/:id', async (request, response, next) => {
+  try { response.json(await adminContentDetail(request.params.id)); } catch (error) { next(error); }
 });
 
 app.post('/api/v1/admin/media/uploads', async (request, response, next) => {

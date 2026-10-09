@@ -7,6 +7,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   CORS_ORIGIN: z.string().default('*'),
+  MEDIA_STORAGE_DRIVER: z.enum(['local', 's3']).default(process.env.NODE_ENV === 'production' ? 's3' : 'local'),
+  MEDIA_LOCAL_DIR: z.string().default('./uploads'),
   AWS_REGION: z.string().optional(),
   AWS_S3_BUCKET: z.string().optional(),
   CLOUDFRONT_DOMAIN: z.string().optional(),

@@ -28,6 +28,7 @@ export interface ViewerProfile {
   name: string;
   email: string;
   role: UserRole;
+  roles: UserRole[];
   isVip: boolean;
 }
 
@@ -45,9 +46,17 @@ export async function loginViewer(email: string, password: string): Promise<View
   return getViewerProfile();
 }
 
-export async function registerViewer(name: string, email: string, password: string): Promise<ViewerProfile> {
+export async function registerViewer(name: string, email: string, password: string, role: UserRole = 'VIEWER'): Promise<ViewerProfile> {
   const session = await request<SessionResponse>('/auth/register', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password, role }),
+  });
+  await persistSession(session);
+  return getViewerProfile();
+}
+
+export async function upgradeViewerRole(role: 'CREATOR' | 'ADVERTISER'): Promise<ViewerProfile> {
+  const session = await request<SessionResponse>('/auth/upgrade-role', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }),
   });
   await persistSession(session);
   return getViewerProfile();
@@ -76,9 +85,41 @@ export interface SupportTicket {
 export interface CreatorSubmission {
   id: string;
   title: string;
+  contentType: 'MOVIE' | 'SERIES';
+  description: string;
+  posterUrl: string | null;
+  rating: string;
+  genre: string;
+  category: string;
+  isExclusiveVip: boolean;
+  isArchived: boolean;
   status: 'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   episodeCount: number;
+  views: number;
+  uniqueViewers: number;
+  watchSeconds: number;
+  episodes: Array<{ episodeNumber: number; title: string; durationSeconds: number; views: number; watchSeconds: number }>;
+}
+
+export interface CreatorPayoutRequest {
+  id: string;
+  amount: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAID';
+  requestedAt: string;
+  processedAt: string | null;
+}
+
+export interface CreatorDashboard {
+  submissions: CreatorSubmission[];
+  payouts: {
+    earned: string;
+    reserved: string;
+    paid: string;
+    available: string;
+    minimumRequest: string;
+    requests: CreatorPayoutRequest[];
+  };
 }
 
 export function getCurrentSubscription(): Promise<CurrentSubscription | null> {
@@ -122,7 +163,8 @@ export interface AdvertiserCampaign {
 }
 
 export async function getCatalog(): Promise<DramaItem[]> {
-  return request<DramaItem[]>('/dramas');
+  const catalog = await request<DramaItem[]>('/dramas');
+  return catalog.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0);
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {
@@ -139,9 +181,21 @@ export function authorizePlayback(episodeId: string): Promise<PlaybackAccess> {
   });
 }
 
+export function recordPlaybackProgress(episodeId: string, sessionUid: string, watchSeconds: number): Promise<void> {
+  return request<void>('/streams/progress', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ episodeId, sessionUid, watchSeconds }),
+  });
+}
+
 export function createCreatorUpload(contentLength: number) {
   return request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/creator/uploads', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentLength }),
+  });
+}
+
+export function createCreatorPosterUpload(contentType: string, contentLength: number) {
+  return request<{ uploadUrl: string; objectKey: string; contentType: string; expiresInSeconds: number; requiredHeaders?: Record<string, string> }>('/creator/uploads/poster', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentType, contentLength }),
   });
 }
 
@@ -149,11 +203,31 @@ export function listCreatorSubmissions(): Promise<CreatorSubmission[]> {
   return request<CreatorSubmission[]>('/creator/submissions');
 }
 
+export function getCreatorDashboard(): Promise<CreatorDashboard> {
+  return request<CreatorDashboard>('/creator/dashboard');
+}
+
+export function archiveCreatorContent(id: string, archived: boolean) {
+  return request<{ id: string; isArchived: boolean }>(`/creator/submissions/${encodeURIComponent(id)}/archive`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }),
+  });
+}
+
+export function deleteCreatorContent(id: string) {
+  return request<{ id: string; deleted: true }>(`/creator/submissions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function requestCreatorPayout(amount: number): Promise<CreatorPayoutRequest> {
+  return request<CreatorPayoutRequest>('/creator/payout-requests', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount }),
+  });
+}
+
 export function submitCreatorContent(payload: {
   title: string;
   contentType: 'MOVIE' | 'SERIES';
   description: string;
-  posterUrl: string;
+  posterKey: string;
   rating: string;
   genre: string;
   category: string;
@@ -179,9 +253,15 @@ export function listAdvertiserCampaigns(): Promise<AdvertiserCampaign[]> {
   return request<AdvertiserCampaign[]>('/advertiser/campaigns');
 }
 
+export function createAdvertiserUpload(contentLength: number) {
+  return request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/advertiser/uploads', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentLength }),
+  });
+}
+
 export function createAdvertiserCampaign(input: {
   campaignName: string;
-  creativeVideoUrl: string;
+  creativeKey: string;
   clickThroughUrl: string;
   cpmRate: number;
   totalBudget: number;

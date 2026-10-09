@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS content (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE content ADD COLUMN IF NOT EXISTS origin geography(Point, 4326);
 CREATE INDEX IF NOT EXISTS content_status_idx ON content(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS content_origin_gist_idx ON content USING GIST(origin);
 

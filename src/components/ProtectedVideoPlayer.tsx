@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Video from 'react-native-video';
-import { authorizePlayback } from '../api/client';
+import { authorizePlayback, recordPlaybackProgress } from '../api/client';
+import { createSessionFingerprint } from '../core/security/sessionStorage';
 
 interface ProtectedVideoPlayerProps {
   episodeId: string;
@@ -11,6 +12,36 @@ interface ProtectedVideoPlayerProps {
 export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const playbackProgress = useRef({ episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 });
+
+  useEffect(() => {
+    const session = { episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 };
+    playbackProgress.current = session;
+    return () => {
+      const seconds = Math.floor(session.pendingSeconds);
+      if (seconds > 0) void recordPlaybackProgress(episodeId, session.sessionUid, seconds).catch(() => undefined);
+    };
+  }, [episodeId]);
+
+  function flushProgress() {
+    const session = playbackProgress.current;
+    const seconds = Math.floor(session.pendingSeconds);
+    if (seconds < 1) return;
+    session.pendingSeconds -= seconds;
+    void recordPlaybackProgress(episodeId, session.sessionUid, seconds).catch(() => {
+      session.pendingSeconds += seconds;
+    });
+  }
+
+  function trackProgress(currentTime: number) {
+    const session = playbackProgress.current;
+    if (session.lastTime !== null) {
+      const elapsed = currentTime - session.lastTime;
+      if (elapsed > 0 && elapsed <= 10) session.pendingSeconds += elapsed;
+      if (session.pendingSeconds >= 15) flushProgress();
+    }
+    session.lastTime = currentTime;
+  }
 
   useEffect(() => {
     let active = true;
@@ -23,7 +54,11 @@ export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayer
   if (error) return <View style={styles.message}><Text style={styles.error}>{error}</Text></View>;
   if (!stream) return <View style={styles.message}><ActivityIndicator color="#22d3ee" /><Text style={styles.loading}>Authorizing stream...</Text></View>;
 
-  return <Video source={{ uri: stream.manifestUrl }} paused={paused} controls resizeMode="contain" style={StyleSheet.absoluteFill} onError={() => setError('Playback failed. Check the media URL and try again.')} />;
+  if (!stream.manifestUrl || !/^https?:\/\//.test(stream.manifestUrl)) {
+    return <View style={styles.message}><Text style={styles.error}>Playback failed. Check the media URL and try again.</Text></View>;
+  }
+
+  return <Video source={{ uri: stream.manifestUrl }} paused={paused} controls resizeMode="contain" style={StyleSheet.absoluteFill} onProgress={({ currentTime }) => trackProgress(currentTime)} onEnd={flushProgress} onError={() => setError('Playback failed. Check the media URL and try again.')} />;
 }
 
 const styles = StyleSheet.create({
