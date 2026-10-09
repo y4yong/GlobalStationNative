@@ -7,9 +7,11 @@ import { createSessionFingerprint } from '../core/security/sessionStorage';
 interface ProtectedVideoPlayerProps {
   episodeId: string;
   paused: boolean;
+  startTime?: number;
+  onDurationChange?: (duration: number) => void;
 }
 
-export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayerProps) {
+export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurationChange }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const playbackProgress = useRef({ episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 });
@@ -58,7 +60,18 @@ export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayer
     return <View style={styles.message}><Text style={styles.error}>Playback failed. Check the media URL and try again.</Text></View>;
   }
 
-  return <Video source={{ uri: stream.manifestUrl }} paused={paused} controls resizeMode="contain" style={StyleSheet.absoluteFill} onProgress={({ currentTime }) => trackProgress(currentTime)} onEnd={flushProgress} onError={() => setError('Playback failed. Check the media URL and try again.')} />;
+  return <Video
+    source={{ uri: stream.manifestUrl }}
+    paused={paused}
+    controls
+    resizeMode="contain"
+    startTime={Math.max(0, startTime)}
+    style={StyleSheet.absoluteFill}
+    onLoad={(event) => onDurationChange?.(event.duration ?? 0)}
+    onProgress={({ currentTime }) => trackProgress(currentTime)}
+    onEnd={flushProgress}
+    onError={() => setError('Playback failed. Check the media URL and try again.')}
+  />;
 }
 
 const styles = StyleSheet.create({

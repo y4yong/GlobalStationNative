@@ -21,17 +21,21 @@ import {
 import { DramaItem, UserRole } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
-import { AdPayload, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, upgradeViewerRole, ViewerProfile } from './src/api/client';
+import { AdPayload, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, upgradeViewerRole, ViewerProfile, ContinueWatchingItem } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
   const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Checkout' | 'Support'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
+  const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState('');
+  const [resumeAtSeconds, setResumeAtSeconds] = useState(0);
+  const [resumeEpisodeId, setResumeEpisodeId] = useState<string | null>(null);
+  const [loadedVideoDuration, setLoadedVideoDuration] = useState<number | null>(null);
   const [adBreakComplete, setAdBreakComplete] = useState(false);
   const [profile, setProfile] = useState<ViewerProfile | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
@@ -50,8 +54,14 @@ export default function App() {
   const loadCatalog = () => {
     setCatalogLoading(true);
     setCatalogError(null);
-    getCatalog()
-      .then((items) => setCatalog(items.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0)))
+    Promise.all([
+      getCatalog(),
+      getContinueWatching(),
+    ])
+      .then(([items, history]) => {
+        setCatalog(items.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0));
+        setContinueWatching(history.filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0));
+      })
       .catch(() => setCatalogError('The catalog is unavailable. Check the API connection and try again.'))
       .finally(() => setCatalogLoading(false));
   };
@@ -81,14 +91,30 @@ export default function App() {
     setCurrentScreen('Details');
   };
 
-  const startPlayback = (drama: DramaItem, epTitle?: string) => {
-    const episode = drama.episodes.find((item) => item.title === epTitle) ?? drama.episodes[0];
+  const formatPlaybackTime = (seconds: number) => {
+    const total = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const startPlayback = (drama: DramaItem, epTitle?: string, resumeAtSeconds = 0, resumeEpisodeId?: string) => {
+    const episode = resumeEpisodeId
+      ? drama.episodes.find((item) => item.id === resumeEpisodeId) ?? drama.episodes[0]
+      : drama.episodes.find((item) => item.title === epTitle) ?? drama.episodes[0];
     if (!episode) {
       Alert.alert('Playback unavailable', 'This title does not have an episode with a media source yet.');
       return;
     }
     setSelectedDrama(drama);
     setSelectedEpisode(episode.title);
+    setResumeAtSeconds(resumeAtSeconds);
+    setResumeEpisodeId(episode.id);
+    setLoadedVideoDuration(null);
     setAdBreakComplete(false);
     setCurrentScreen('Player');
   };
@@ -130,6 +156,23 @@ export default function App() {
               <Text style={styles.cyanPrimaryBtnText}>▶ Play Episode</Text>
             </TouchableOpacity>
 
+            {continueWatching.find((item) => item.id === selectedDrama.id) && (
+              <TouchableOpacity
+                style={[styles.cyanPrimaryBtn, { marginTop: 12, backgroundColor: '#0f172a', borderColor: '#22d3ee', borderWidth: 1 }]}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const item = continueWatching.find((entry) => entry.id === selectedDrama.id);
+                  if (item) {
+                    startPlayback(selectedDrama, item.episodeTitle, item.resumeAtSeconds, item.episodeId);
+                  }
+                }}
+              >
+                <Text style={styles.cyanPrimaryBtnText}>
+                  {`▶ Resume from ${formatPlaybackTime(continueWatching.find((item) => item.id === selectedDrama.id)?.resumeAtSeconds ?? 0)}${loadedVideoDuration ? ` / ${formatPlaybackTime(loadedVideoDuration)}` : ''}`}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             <Text style={styles.sectionHeaderTitle}>Episode Details</Text>
             {selectedDrama.episodes.map((ep) => (
               <View key={ep.id} style={styles.episodeCard}>
@@ -161,6 +204,8 @@ export default function App() {
             <ProtectedVideoPlayer
               episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
               paused={!adBreakComplete}
+              startTime={resumeAtSeconds}
+              onDurationChange={setLoadedVideoDuration}
             />
             {!adBreakComplete && <AdBreak onComplete={() => setAdBreakComplete(true)} />}
           </View>
@@ -178,7 +223,20 @@ export default function App() {
       ) : (
         /* SCREEN 1, 4, 5, 6: TAB VIEWS */
         <View style={{ flex: 1 }}>
-          {activeTab === 'Home' && <HomeTabView dramas={catalog} loading={catalogLoading} error={catalogError} onRetry={loadCatalog} onSelect={openDramaDetails} onPlay={startPlayback} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
+          {activeTab === 'Home' && <HomeTabView dramas={catalog} continueWatching={continueWatching} loading={catalogLoading} error={catalogError} onRetry={loadCatalog} onSelect={openDramaDetails} onPlay={startPlayback} onContinueWatching={(item) => {
+            const drama = catalog.find((entry) => entry.id === item.id) ?? {
+              id: item.id,
+              title: item.title,
+              category: item.category,
+              genre: item.genre,
+              rating: item.rating,
+              badge: item.badge,
+              posterUrl: item.posterUrl,
+              description: item.description,
+              episodes: [{ id: item.episodeId, title: item.episodeTitle, duration: `${Math.round(item.durationSeconds / 60)} min`, rating: item.rating }],
+            };
+            startPlayback(drama, item.episodeTitle, item.resumeAtSeconds, item.episodeId);
+          }} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
           {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} />}
           {activeTab === 'Creator' && <CreatorTabView creatorName={profile.name} onUpload={() => setCurrentScreen('Upload')} />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
@@ -279,7 +337,7 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
   return <Image source={{ uri }} style={style} resizeMode="cover" />;
 }
 
-function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
+function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSelect, onPlay, onContinueWatching, onSearch, onProfile }: { dramas: DramaItem[]; continueWatching: ContinueWatchingItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onContinueWatching: (item: ContinueWatchingItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
   const normalizedFilter = filter.trim().toLowerCase();
   const visibleDramas = filter === 'All'
@@ -337,21 +395,24 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
       </View>}
 
       {/* Continue Watching Rail */}
-      <Text style={styles.sectionHeaderTitle}>Continue Watching</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-        {visibleDramas.filter((d) => d.progress).map((d) => (
-          <TouchableOpacity key={d.id} style={styles.continueCard} onPress={() => onSelect(d)}>
-            <PosterImage uri={d.posterUrl} title={d.title} badge={d.badge} style={styles.continuePosterPlaceholder} />
-            <View style={styles.progressTrackSmall}>
-              <View style={[styles.progressBarSmall, { width: `${(d.progress || 0) * 100}%` }]} />
-            </View>
-            <View style={styles.cardFooterRow}>
-              <Text style={styles.metaSmallText}>{d.timeLeft}</Text>
-              <Text style={styles.metaSmallText}>{d.rating}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {continueWatching.length > 0 && (
+        <>
+          <Text style={styles.sectionHeaderTitle}>Continue Watching</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
+            {continueWatching.map((item) => (
+              <TouchableOpacity key={item.episodeId} style={styles.continueCard} onPress={() => onContinueWatching(item)}>
+                <PosterImage uri={item.posterUrl} title={item.title} badge={item.badge} style={styles.continuePosterPlaceholder} />
+                <View style={styles.progressTrackSmall}>
+                  <View style={[styles.progressBarSmall, { width: `${Math.min(Math.max((item.progress ?? 0) * 100, 0), 100)}%` }]} />
+                </View>
+                <View style={styles.cardFooterRow}>
+                  <Text style={styles.metaSmallText}>{item.title}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
 
       {/* Popular Dramas Rail */}
       <View style={styles.sectionTitleRow}>
@@ -1191,8 +1252,8 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   placeholderLabel: { color: COLORS.textMuted, fontSize: 11, textAlign: 'center', fontWeight: '600' },
-  progressTrackSmall: { height: 3, backgroundColor: '#0f172a', width: '100%' },
-  progressBarSmall: { height: '100%', backgroundColor: COLORS.cyan },
+  progressTrackSmall: { height: 4, backgroundColor: '#1e293b', width: '100%', borderRadius: 2, overflow: 'hidden', marginTop: 8 },
+  progressBarSmall: { height: '100%', backgroundColor: '#ef4444' },
   cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8 },
   metaSmallText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
 

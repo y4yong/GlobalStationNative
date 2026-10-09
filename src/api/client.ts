@@ -149,6 +149,23 @@ export interface AdPayload {
   clickThroughUrl: string | null;
 }
 
+export interface ContinueWatchingItem {
+  id: string;
+  title: string;
+  category: string;
+  genre: string;
+  rating: string;
+  badge: 'VIP' | 'FREE';
+  posterUrl?: string;
+  description: string;
+  episodeId: string;
+  episodeTitle: string;
+  durationSeconds: number;
+  resumeAtSeconds: number;
+  progress: number;
+  timeLeft: string;
+}
+
 export interface AdvertiserCampaign {
   id: string;
   campaignName: string;
@@ -165,6 +182,11 @@ export interface AdvertiserCampaign {
 export async function getCatalog(): Promise<DramaItem[]> {
   const catalog = await request<DramaItem[]>('/dramas');
   return catalog.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0);
+}
+
+export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
+  const history = await request<ContinueWatchingItem[]>('/watch-history');
+  return history.filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0);
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {

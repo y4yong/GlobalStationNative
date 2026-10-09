@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
 import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
-import { listDramas } from './catalogRepository.js';
+import { listContinueWatching, listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
 import { createVipCheckout, currentSubscription, processBillplzCallback } from './billing.js';
@@ -58,6 +58,14 @@ if (config.MEDIA_STORAGE_DRIVER === 'local') {
 app.get('/api/v1/dramas', async (_request, response, next) => {
   try {
     response.json(await listDramas());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/watch-history', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listContinueWatching(getAuthenticatedUser(request).id));
   } catch (error) {
     next(error);
   }
