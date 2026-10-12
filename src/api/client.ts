@@ -246,7 +246,7 @@ export async function calculatePayout(views: number, revenueShare = 0.3) {
 }
 
 export function getAdPayload(): Promise<AdPayload | null> {
-  return request<AdPayload>('/ads/next');
+  return request<AdPayload | null>('/ads/next');
 }
 
 export function listAdvertiserCampaigns(): Promise<AdvertiserCampaign[]> {

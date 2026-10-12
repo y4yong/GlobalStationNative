@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAUSED', 'COMPLETED')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS click_through_url TEXT;
 
 CREATE TABLE IF NOT EXISTS ad_impressions (
   id BIGSERIAL PRIMARY KEY,
@@ -230,6 +231,54 @@ VALUES
   ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
+INSERT INTO content (
+  id, title, content_type, description, poster_url, backdrop_url, rating,
+  genre, category, language_code, is_featured, is_exclusive_vip, status, origin, created_by
+)
+VALUES (
+  '10000000-0000-0000-0000-000000000001',
+  'The Kuala Lumpur Files',
+  'SERIES',
+  'A detective uncovers a city-wide conspiracy hidden in Kuala Lumpur.',
+  'https://images.unsplash.com/photo-1596422846543-75c6fc197f07',
+  'https://images.unsplash.com/photo-1596422846543-75c6fc197f07',
+  'P13',
+  'Drama',
+  'Featured',
+  'en',
+  TRUE,
+  FALSE,
+  'APPROVED',
+  ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography,
+  '00000000-0000-0000-0000-000000000002'
+)
+ON CONFLICT (id) DO UPDATE
+SET title = EXCLUDED.title,
+    content_type = EXCLUDED.content_type,
+    description = EXCLUDED.description,
+    poster_url = EXCLUDED.poster_url,
+    backdrop_url = EXCLUDED.backdrop_url,
+    rating = EXCLUDED.rating,
+    genre = EXCLUDED.genre,
+    category = EXCLUDED.category,
+    language_code = EXCLUDED.language_code,
+    is_featured = EXCLUDED.is_featured,
+    is_exclusive_vip = EXCLUDED.is_exclusive_vip,
+    status = EXCLUDED.status,
+    origin = EXCLUDED.origin,
+    created_by = EXCLUDED.created_by;
+
+INSERT INTO episodes (id, content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview)
+VALUES
+  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 1, 'The First Clue', 1800, 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', TRUE),
+  ('20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 4, 'The Final Lead', 1860, 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', FALSE)
+ON CONFLICT (id) DO UPDATE
+SET content_id = EXCLUDED.content_id,
+    episode_number = EXCLUDED.episode_number,
+    title = EXCLUDED.title,
+    duration_seconds = EXCLUDED.duration_seconds,
+    hls_manifest_url = EXCLUDED.hls_manifest_url,
+    is_free_preview = EXCLUDED.is_free_preview;
 
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
 VALUES ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'VIP_MONTHLY', 'ACTIVE', now() - interval '12 days', now() + interval '18 days')
@@ -248,8 +297,11 @@ VALUES ('60000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO ad_campaigns (id, advertiser_id, campaign_name, creative_video_url, cpm_rate, total_budget, remaining_budget, target_tier, status)
-VALUES ('70000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'North Star EV Launch', 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4', 12.50, 25000.00, 18750.00, 'FREE', 'ACTIVE')
-ON CONFLICT (id) DO NOTHING;
+VALUES ('70000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'Global Station', 'http://localhost:5000/assets/ads/global-station-promo.mp4', 12.50, 25000.00, 18750.00, 'ALL', 'ACTIVE')
+ON CONFLICT (id) DO UPDATE
+SET campaign_name = EXCLUDED.campaign_name,
+    creative_video_url = EXCLUDED.creative_video_url,
+    target_tier = EXCLUDED.target_tier;
 
 INSERT INTO watch_logs (user_id, episode_id, watch_seconds, device_ip, session_uid, latitude, longitude, location)
 VALUES

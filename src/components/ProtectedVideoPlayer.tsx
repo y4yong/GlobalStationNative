@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import Video from 'react-native-video';
+import Video, { ViewType } from 'react-native-video';
 import { authorizePlayback, recordPlaybackProgress } from '../api/client';
 import { createSessionFingerprint } from '../core/security/sessionStorage';
 
 interface ProtectedVideoPlayerProps {
   episodeId: string;
   paused: boolean;
+  onPlaybackProgress?: (currentTime: number, duration: number) => void;
 }
 
-export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayerProps) {
+export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const duration = useRef(0);
   const playbackProgress = useRef({ episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 });
 
   useEffect(() => {
@@ -58,7 +60,21 @@ export function ProtectedVideoPlayer({ episodeId, paused }: ProtectedVideoPlayer
     return <View style={styles.message}><Text style={styles.error}>Playback failed. Check the media URL and try again.</Text></View>;
   }
 
-  return <Video source={{ uri: stream.manifestUrl }} paused={paused} controls resizeMode="contain" style={StyleSheet.absoluteFill} onProgress={({ currentTime }) => trackProgress(currentTime)} onEnd={flushProgress} onError={() => setError('Playback failed. Check the media URL and try again.')} />;
+  return <Video
+    source={{ uri: stream.manifestUrl }}
+    paused={paused}
+    controls
+    resizeMode="contain"
+    viewType={ViewType.TEXTURE}
+    style={StyleSheet.absoluteFill}
+    onLoad={({ duration: loadedDuration }) => { duration.current = loadedDuration; }}
+    onProgress={({ currentTime }) => {
+      trackProgress(currentTime);
+      onPlaybackProgress?.(currentTime, duration.current);
+    }}
+    onEnd={flushProgress}
+    onError={() => setError('Playback failed. Check the media URL and try again.')}
+  />;
 }
 
 const styles = StyleSheet.create({

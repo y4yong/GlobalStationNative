@@ -1,6 +1,7 @@
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
 import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
@@ -35,6 +36,7 @@ app.use(helmet());
 app.use(cors({ origin: config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+app.use('/assets/ads', express.static(fileURLToPath(new URL('../assets/ads/', import.meta.url)), { maxAge: '1d' }));
 
 app.get('/health', (_request, response) => {
   response.json({ status: 'ok', service: 'globalstation-api' });

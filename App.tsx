@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { keepLocalCopy, pick, types } from '@react-native-documents/picker';
 import ReactNativeBlobUtil from 'react-native-blob-util';
-import Video from 'react-native-video';
+import Video, { ViewType } from 'react-native-video';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -21,6 +21,7 @@ import {
 import { DramaItem, UserRole } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
+import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
 import { AdPayload, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, upgradeViewerRole, ViewerProfile } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 
@@ -32,7 +33,9 @@ export default function App() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState('');
-  const [adBreakComplete, setAdBreakComplete] = useState(false);
+  const [adBreakPhase, setAdBreakPhase] = useState<'pre-roll' | PlaybackAdBreak | null>(null);
+  const activeAdBreak = useRef<'pre-roll' | PlaybackAdBreak | null>(null);
+  const playedAdBreaks = useRef(new Set<PlaybackAdBreak>());
   const [profile, setProfile] = useState<ViewerProfile | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
@@ -89,8 +92,26 @@ export default function App() {
     }
     setSelectedDrama(drama);
     setSelectedEpisode(episode.title);
-    setAdBreakComplete(false);
+    playedAdBreaks.current.clear();
+    activeAdBreak.current = 'pre-roll';
+    setAdBreakPhase('pre-roll');
     setCurrentScreen('Player');
+  };
+
+  const handlePlaybackProgress = (currentTime: number, duration: number) => {
+    if (activeAdBreak.current !== null) return;
+    const dueBreak = getDueAdBreak(currentTime, duration, playedAdBreaks.current);
+    if (dueBreak) {
+      playedAdBreaks.current.add(dueBreak);
+      activeAdBreak.current = dueBreak;
+      setAdBreakPhase(dueBreak);
+    }
+  };
+
+  const finishAdBreak = (phase: 'pre-roll' | PlaybackAdBreak) => {
+    if (activeAdBreak.current !== phase) return;
+    activeAdBreak.current = null;
+    setAdBreakPhase(null);
   };
 
   return (
@@ -120,7 +141,7 @@ export default function App() {
               </View>
             </View>
 
-            <Text style={styles.dramaDescription}>{selectedDrama.description}</Text>
+            <Text numberOfLines={2} style={styles.dramaDescription}>{selectedDrama.description}</Text>
 
             <TouchableOpacity
               style={styles.cyanPrimaryBtn}
@@ -130,7 +151,7 @@ export default function App() {
               <Text style={styles.cyanPrimaryBtnText}>▶ Play Episode</Text>
             </TouchableOpacity>
 
-            <Text style={styles.sectionHeaderTitle}>Episode Details</Text>
+            <Text style={styles.sectionHeaderTitle}>Episodes</Text>
             {selectedDrama.episodes.map((ep) => (
               <View key={ep.id} style={styles.episodeCard}>
                 <View style={{ flex: 1 }}>
@@ -160,9 +181,13 @@ export default function App() {
           <View style={styles.videoStage}>
             <ProtectedVideoPlayer
               episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
-              paused={!adBreakComplete}
+              paused={adBreakPhase !== null}
+              onPlaybackProgress={handlePlaybackProgress}
             />
-            {!adBreakComplete && <AdBreak onComplete={() => setAdBreakComplete(true)} />}
+            {adBreakPhase !== null && <AdBreak key={adBreakPhase} phase={adBreakPhase} onComplete={() => finishAdBreak(adBreakPhase)} />}
+            <View pointerEvents="none" style={styles.watermarkContainer}>
+              <Text style={styles.watermarkText}>GLOBAL STATION</Text>
+            </View>
           </View>
         </View>
       ) : currentScreen === 'Payout' ? (
@@ -187,7 +212,7 @@ export default function App() {
       )}
 
       {/* ===================== BOTTOM NAVIGATION ===================== */}
-      <View style={styles.bottomNav}>
+      {currentScreen === 'Tabs' && <View style={styles.bottomNav}>
         {availableTabs.map((tab) => {
           const isActive = activeTab === tab.key && currentScreen === 'Tabs';
           return (
@@ -204,7 +229,7 @@ export default function App() {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </View>}
     </SafeAreaView>
   );
 }
@@ -282,12 +307,14 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
 function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
   const normalizedFilter = filter.trim().toLowerCase();
+  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [drama.category, drama.genre]).filter(Boolean))).sort(), ...(dramas.some((drama) => drama.badge === 'VIP') ? ['VIP'] : [])];
   const visibleDramas = filter === 'All'
     ? dramas
     : dramas.filter((d) => {
         const categoryMatch = d.category?.toLowerCase().includes(normalizedFilter) || d.genre?.toLowerCase().includes(normalizedFilter);
-        return filter === '⭐ VIP' ? d.badge === 'VIP' : categoryMatch;
+        return filter === 'VIP' ? d.badge === 'VIP' : categoryMatch;
       });
+  const continueWatching = visibleDramas.filter((d) => d.progress);
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
@@ -301,7 +328,7 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
 
       {/* Genre Chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        {['All', 'Malay Drama', 'Action', '⭐ VIP'].map((c) => (
+        {filters.map((c) => (
           <TouchableOpacity
             key={c}
             style={[styles.chip, filter === c && styles.chipActive]}
@@ -336,27 +363,26 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
         </View>
       </View>}
 
-      {/* Continue Watching Rail */}
-      <Text style={styles.sectionHeaderTitle}>Continue Watching</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-        {visibleDramas.filter((d) => d.progress).map((d) => (
-          <TouchableOpacity key={d.id} style={styles.continueCard} onPress={() => onSelect(d)}>
-            <PosterImage uri={d.posterUrl} title={d.title} badge={d.badge} style={styles.continuePosterPlaceholder} />
-            <View style={styles.progressTrackSmall}>
-              <View style={[styles.progressBarSmall, { width: `${(d.progress || 0) * 100}%` }]} />
-            </View>
-            <View style={styles.cardFooterRow}>
-              <Text style={styles.metaSmallText}>{d.timeLeft}</Text>
-              <Text style={styles.metaSmallText}>{d.rating}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {continueWatching.length > 0 && <>
+        <Text style={styles.sectionHeaderTitle}>Continue watching</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
+          {continueWatching.map((d) => (
+            <TouchableOpacity key={d.id} style={styles.continueCard} onPress={() => onSelect(d)}>
+              <PosterImage uri={d.posterUrl} title={d.title} badge={d.badge} style={styles.continuePosterPlaceholder} />
+              <View style={styles.progressTrackSmall}>
+                <View style={[styles.progressBarSmall, { width: `${(d.progress || 0) * 100}%` }]} />
+              </View>
+              <View style={styles.cardFooterRow}>
+                <Text style={styles.metaSmallText}>{d.timeLeft}</Text>
+                <Text style={styles.metaSmallText}>{d.rating}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </>}
 
-      {/* Popular Dramas Rail */}
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionHeaderTitle}>Popular Dramas</Text>
-        <TouchableOpacity onPress={() => setFilter('All')}><Text style={styles.seeAllText}>See all ›</Text></TouchableOpacity>
+        <Text style={styles.sectionHeaderTitle}>Titles</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
         {visibleDramas.filter((d) => !d.progress).map((d) => (
@@ -369,6 +395,7 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
           </TouchableOpacity>
         ))}
       </ScrollView>
+      {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
 }
@@ -378,6 +405,7 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
   const [query, setQuery] = useState('');
   const [selectedPill, setSelectedPill] = useState('All');
   const [results, setResults] = useState<DramaItem[]>(dramas);
+  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [drama.category, drama.genre]).filter(Boolean))).sort(), ...(dramas.some((drama) => drama.badge === 'VIP') ? ['VIP'] : [])];
 
   useEffect(() => {
     setResults(dramas);
@@ -393,7 +421,7 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
 
   const filtered = results.filter((d) => {
     if (selectedPill === 'All') return true;
-    if (selectedPill === 'VIP Only') return d.badge === 'VIP';
+    if (selectedPill === 'VIP') return d.badge === 'VIP';
     const normalizedPill = selectedPill.trim().toLowerCase();
     const normalizedCategory = (d.category ?? '').trim().toLowerCase();
     const normalizedGenre = (d.genre ?? '').trim().toLowerCase();
@@ -406,18 +434,17 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
-          placeholder="Search dramas, films, actors..."
+          placeholder="Search titles..."
           placeholderTextColor={COLORS.textDim}
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
         />
-        <Text style={styles.filterIcon}>𝌡</Text>
       </View>
 
       {/* Filter Chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chipRow, { paddingHorizontal: 0 }]}>
-        {['All', 'Action', 'Romance', 'VIP Only'].map((pill) => (
+        {filters.map((pill) => (
           <TouchableOpacity
             key={pill}
             style={[styles.chip, selectedPill === pill && styles.chipActive]}
@@ -428,7 +455,6 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
         ))}
       </ScrollView>
 
-      <Text style={[styles.sectionHeaderTitle, { marginTop: 16 }]}>Search & Filter</Text>
       <Text style={styles.resultsCount}>{filtered.length} Results</Text>
 
       {/* Drama Search Results List */}
@@ -444,6 +470,7 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
           </View>
         </TouchableOpacity>
       ))}
+      {!loading && filtered.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
 }
@@ -754,21 +781,41 @@ function FlowField({ label, value, multiline = false }: { label: string; value: 
   return <View style={styles.flowField}><Text style={styles.flowLabel}>{label}</Text><TextInput value={value} editable={false} multiline={multiline} style={[styles.flowInput, multiline && styles.flowTextArea]} placeholderTextColor={COLORS.textDim} /></View>;
 }
 
-function AdBreak({ onComplete }: { onComplete: () => void }) {
+function AdBreak({ phase, onComplete }: { phase: 'pre-roll' | PlaybackAdBreak; onComplete: () => void }) {
   const [ad, setAd] = useState<AdPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [secondsUntilSkip, setSecondsUntilSkip] = useState(5);
   const onCompleteRef = useRef(onComplete);
+  const activeRef = useRef(true);
+  const requestIdRef = useRef(0);
   onCompleteRef.current = onComplete;
 
-  useEffect(() => {
-    let active = true;
+  const loadAd = useCallback(() => {
+    const requestId = ++requestIdRef.current;
+    setLoading(true);
+    setError(null);
     getAdPayload().then((payload) => {
-      if (!active) return;
+      if (!activeRef.current || requestId !== requestIdRef.current) return;
       if (!payload) onCompleteRef.current();
       else setAd(payload);
-    }).catch(() => active && onCompleteRef.current());
-    return () => { active = false; };
+    }).catch((requestError) => {
+      if (activeRef.current && requestId === requestIdRef.current) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to load an ad.');
+      }
+    }).finally(() => {
+      if (activeRef.current && requestId === requestIdRef.current) setLoading(false);
+    });
   }, []);
+
+  useEffect(() => {
+    activeRef.current = true;
+    loadAd();
+    return () => {
+      activeRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, [loadAd]);
 
   useEffect(() => {
     if (!ad || secondsUntilSkip <= 0) return;
@@ -776,15 +823,28 @@ function AdBreak({ onComplete }: { onComplete: () => void }) {
     return () => clearTimeout(timer);
   }, [ad, secondsUntilSkip]);
 
-  if (!ad) return <View pointerEvents="none" style={StyleSheet.absoluteFill} />;
+  if (error) return <View style={[StyleSheet.absoluteFill, styles.adErrorBackdrop]}>
+    <View style={styles.adCard}>
+      <Text style={styles.adTitle}>Ad unavailable</Text>
+      <Text style={styles.adErrorText}>{error}</Text>
+      <View style={styles.adActionRow}>
+        <TouchableOpacity onPress={loadAd}><Text style={styles.learnMoreText}>Retry</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.skipBtn} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>Continue</Text></TouchableOpacity>
+      </View>
+    </View>
+  </View>;
+  if (loading || !ad) return <View style={[StyleSheet.absoluteFill, styles.adLoading]}>
+    <ActivityIndicator color={COLORS.cyan} />
+    <Text style={styles.adLoadingText}>Loading ad…</Text>
+  </View>;
   return <View style={StyleSheet.absoluteFill}>
-    <Video source={{ uri: ad.creativeVideoUrl }} paused={false} controls={false} resizeMode="contain" style={StyleSheet.absoluteFill} onEnd={onComplete} onError={onComplete} />
+    <Video source={{ uri: ad.creativeVideoUrl }} paused={false} controls={false} resizeMode="contain" viewType={ViewType.TEXTURE} style={StyleSheet.absoluteFill} onEnd={() => onCompleteRef.current()} onError={() => setError('The ad video could not be played.')} />
     <View style={[styles.adCard, { position: 'absolute', left: 16, right: 16, bottom: 16 }]}>
-      <View style={styles.adHeaderRow}><View style={styles.daiBadge}><Text style={styles.daiBadgeText}>SPONSORED</Text></View><Text style={styles.adRemaining}>{secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Ad'}</Text></View>
+      <View style={styles.adHeaderRow}><View style={styles.daiBadge}><Text style={styles.daiBadgeText}>AD</Text></View><Text style={styles.adRemaining}>{phase.toUpperCase().replace('-', ' ')}</Text></View>
       <Text style={styles.adTitle}>{ad.title}</Text>
       <View style={styles.adActionRow}>
         {ad.clickThroughUrl && <TouchableOpacity onPress={() => Linking.openURL(ad.clickThroughUrl!).catch(() => Alert.alert('Unable to open link', 'The advertiser link could not be opened.'))}><Text style={styles.learnMoreText}>Visit advertiser</Text></TouchableOpacity>}
-        {secondsUntilSkip === 0 && <TouchableOpacity style={styles.skipBtn} onPress={onComplete}><Text style={styles.skipBtnText}>Skip ad</Text></TouchableOpacity>}
+        <TouchableOpacity style={styles.skipBtn} disabled={secondsUntilSkip > 0} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>{secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Skip ad'}</Text></TouchableOpacity>
       </View>
     </View>
   </View>;
@@ -1253,8 +1313,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
   },
-  watermarkContainer: { position: 'absolute', zIndex: 99, opacity: 0.3 },
-  watermarkText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  watermarkContainer: { position: 'absolute', top: 12, right: 12, zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 },
+  watermarkText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  emptyCatalog: { color: COLORS.textDim, fontSize: 13, textAlign: 'center', padding: 24 },
+  adLoading: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  adLoadingText: { color: '#fff', fontSize: 12, marginTop: 10 },
+  adErrorBackdrop: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#050a12' },
+  adErrorText: { color: COLORS.textMuted, fontSize: 12, marginTop: 8 },
   adCard: {
     width: '90%',
     backgroundColor: '#0d1829',
