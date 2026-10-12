@@ -26,6 +26,7 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import { api, login } from './api';
+import globalStationLogo from '../../assets/brand/global-station-logo.png';
 
 type View =
   | 'overview'
@@ -78,9 +79,7 @@ function Login() {
         </div>
       </div>
       <form className="login-panel" onSubmit={submit}>
-        <div className="brand-mark">
-          GS<span>•</span>
-        </div>
+        <img className="brand-logo login-brand-logo" src={globalStationLogo} alt="Global Station" />
         <h2>Sign in to Control Room</h2>
         <p className="muted">Administrator access only.</p>
         <label>
@@ -144,9 +143,7 @@ function App() {
     <div className="app-shell">
       <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
         <div className="sidebar-brand">
-          <div className="brand-mark">
-            GS<span>•</span>
-          </div>
+          <img className="brand-logo" src={globalStationLogo} alt="Global Station" />
           <div>
             <strong>GLOBAL STATION</strong>
             <small>CONTROL ROOM</small>

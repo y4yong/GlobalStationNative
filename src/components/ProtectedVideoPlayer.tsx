@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Video, { ViewType } from 'react-native-video';
 import { authorizePlayback, recordPlaybackProgress } from '../api/client';
 import { createSessionFingerprint } from '../core/security/sessionStorage';
+import { COLORS } from '../theme/colors';
 
 interface ProtectedVideoPlayerProps {
   episodeId: string;
@@ -54,7 +55,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
   }, [episodeId]);
 
   if (error) return <View style={styles.message}><Text style={styles.error}>{error}</Text></View>;
-  if (!stream) return <View style={styles.message}><ActivityIndicator color="#22d3ee" /><Text style={styles.loading}>Authorizing stream...</Text></View>;
+  if (!stream) return <View style={styles.message}><ActivityIndicator color={COLORS.cyan} /><Text style={styles.loading}>Authorizing stream...</Text></View>;
 
   if (!stream.manifestUrl || !/^https?:\/\//.test(stream.manifestUrl)) {
     return <View style={styles.message}><Text style={styles.error}>Playback failed. Check the media URL and try again.</Text></View>;
@@ -78,7 +79,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
 }
 
 const styles = StyleSheet.create({
-  message: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: '#050a12' },
-  loading: { color: '#94a3b8', marginTop: 8 },
-  error: { color: '#fca5a5' },
+  message: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.bg },
+  loading: { color: COLORS.textMuted, marginTop: 8 },
+  error: { color: '#f5a6a8' },
 });

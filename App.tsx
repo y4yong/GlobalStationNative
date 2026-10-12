@@ -6,11 +6,11 @@ import {
   ActivityIndicator,
   SafeAreaView,
   View,
-  Text,
+  Text as NativeText,
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  TextInput,
+  TextInput as NativeTextInput,
   StatusBar,
   Platform,
   Alert,
@@ -18,12 +18,32 @@ import {
   Image,
   Modal,
 } from 'react-native';
+import type { TextInputProps, TextProps } from 'react-native';
 import { DramaItem, UserRole } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
 import { AdPayload, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, upgradeViewerRole, ViewerProfile } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
+
+const Text = ({ style, ...props }: TextProps) => {
+  const fontSize = StyleSheet.flatten(style)?.fontSize;
+  return <NativeText {...props} style={[style, {
+    fontFamily: Platform.select({ android: 'sans-serif', ios: 'System' }),
+    fontSize: Math.max(typeof fontSize === 'number' ? fontSize : 16, 12),
+  }]} />;
+};
+
+const TextInput = ({ style, ...props }: TextInputProps) => {
+  const inputStyle = StyleSheet.flatten(style);
+  const fontSize = inputStyle?.fontSize;
+  const minHeight = inputStyle?.minHeight;
+  return <NativeTextInput {...props} style={[style, {
+    fontFamily: Platform.select({ android: 'sans-serif', ios: 'System' }),
+    fontSize: Math.max(typeof fontSize === 'number' ? fontSize : 16, 16),
+    minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 52),
+  }]} />;
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
@@ -33,6 +53,7 @@ export default function App() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState('');
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [adBreakPhase, setAdBreakPhase] = useState<'pre-roll' | PlaybackAdBreak | null>(null);
   const activeAdBreak = useRef<'pre-roll' | PlaybackAdBreak | null>(null);
   const playedAdBreaks = useRef(new Set<PlaybackAdBreak>());
@@ -81,6 +102,7 @@ export default function App() {
 
   const openDramaDetails = (drama: DramaItem) => {
     setSelectedDrama(drama);
+    setDescriptionExpanded(false);
     setCurrentScreen('Details');
   };
 
@@ -131,7 +153,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
+          <ScrollView contentContainerStyle={styles.detailsContent}>
             <View style={styles.heroCard}>
               <PosterImage uri={selectedDrama.posterUrl} title={selectedDrama.title} badge={selectedDrama.badge} style={styles.heroPosterImage} />
               <View style={styles.heroGradient}>
@@ -141,7 +163,17 @@ export default function App() {
               </View>
             </View>
 
-            <Text numberOfLines={2} style={styles.dramaDescription}>{selectedDrama.description}</Text>
+            <Text numberOfLines={descriptionExpanded ? undefined : 4} style={styles.dramaDescription}>{selectedDrama.description}</Text>
+            {selectedDrama.description.length > 180 && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ expanded: descriptionExpanded }}
+                style={styles.descriptionToggle}
+                onPress={() => setDescriptionExpanded((expanded) => !expanded)}
+              >
+                <Text style={styles.descriptionToggleText}>{descriptionExpanded ? 'Show less' : 'Read full description'}</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.cyanPrimaryBtn}
@@ -261,7 +293,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
   return (
     <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 24 }]}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
-        <Text style={styles.brandTitle}>GLOBAL STATION</Text>
+        <Text style={styles.authLogo}>GLOBAL STATION</Text>
         <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
         <Text style={styles.screenSubTitle}>Your account connects to the Global Station service.</Text>
         {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
@@ -315,6 +347,7 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
         return filter === 'VIP' ? d.badge === 'VIP' : categoryMatch;
       });
   const continueWatching = visibleDramas.filter((d) => d.progress);
+  const titleDramas = visibleDramas.filter((d) => !d.progress && (filter !== 'All' || d.id !== dramas[0]?.id));
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
@@ -348,7 +381,7 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
       )}
 
       {/* Hero Banner */}
-      {dramas[0] && <View style={styles.heroCard}>
+      {filter === 'All' && dramas[0] && <View style={styles.heroCard}>
         <PosterImage uri={dramas[0].posterUrl} title={dramas[0].title} badge={dramas[0].badge} style={styles.heroPosterImage} />
         <View style={styles.heroGradient}>
           <View style={styles.vipTag}><Text style={styles.vipTagText}>{dramas[0].badge}</Text></View>
@@ -381,20 +414,24 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
         </ScrollView>
       </>}
 
-      <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionHeaderTitle}>Titles</Text>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-        {visibleDramas.filter((d) => !d.progress).map((d) => (
-          <TouchableOpacity key={d.id} style={styles.popularCard} onPress={() => onSelect(d)}>
-            <PosterImage uri={d.posterUrl} title={d.title} badge={d.badge} style={styles.popularPosterPlaceholder} />
-            <View style={d.badge === 'VIP' ? styles.badgeVip : styles.badgeFree}>
-              <Text style={styles.badgeText}>{d.badge}</Text>
-            </View>
-            <Text numberOfLines={2} style={styles.popularCardTitle}>{d.title}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {titleDramas.length > 0 && <>
+        <View style={styles.sectionTitleRow}>
+          <Text style={styles.sectionHeaderTitle}>Titles</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
+          {titleDramas.map((d) => (
+            <TouchableOpacity key={d.id} style={styles.popularCard} onPress={() => onSelect(d)}>
+              <View style={styles.popularPosterFrame}>
+                <PosterImage uri={d.posterUrl} title={d.title} badge={d.badge} style={styles.popularPosterPlaceholder} />
+                <View style={[styles.posterBadge, d.badge === 'VIP' ? styles.badgeVip : styles.badgeFree]}>
+                  <Text style={styles.badgeText}>{d.badge}</Text>
+                </View>
+              </View>
+              <Text numberOfLines={2} style={styles.popularCardTitle}>{d.title}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </>}
       {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
@@ -1142,18 +1179,20 @@ const styles = StyleSheet.create({
   secondaryFlowText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
   topHeader: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
   backBtnText: { color: COLORS.cyan, fontSize: 16, fontWeight: '700' },
+  detailsContent: { paddingHorizontal: 18, paddingBottom: 104 },
 
   brandHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
-  brandTitle: { fontSize: 20, fontWeight: '900', color: COLORS.cyan, letterSpacing: 0.8 },
-  headerRightIcons: { flexDirection: 'row', gap: 14 },
-  iconTxt: { color: COLORS.textLight, fontSize: 18 },
+  brandTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textLight, letterSpacing: 1.1 },
+  authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 21, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  headerRightIcons: { flexDirection: 'row', gap: 8 },
+  iconTxt: { color: COLORS.textLight, fontSize: 20, paddingHorizontal: 7, paddingVertical: 5 },
 
   chipRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   chip: {
@@ -1166,25 +1205,22 @@ const styles = StyleSheet.create({
   },
   chipActive: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
   chipText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#000', fontWeight: '800' },
+  chipTextActive: { color: '#10201f', fontWeight: '800' },
 
-  heroCard: { marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden' },
+  heroCard: { marginHorizontal: 18, marginTop: 8, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder },
   heroPosterImage: {
     width: '100%',
-    height: 210,
-    backgroundColor: '#162e4a',
+    height: 150,
+    backgroundColor: COLORS.cardBg,
     borderBottomWidth: 1,
     borderColor: COLORS.cardBorder,
   },
   heroGradient: {
-    backgroundColor: '#162e4a',
-    padding: 18,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
+    backgroundColor: COLORS.cardBg,
+    padding: 14,
   },
   heroPosterPlaceholder: {
-    backgroundColor: '#162e4a',
+    backgroundColor: COLORS.cardBg,
     padding: 20,
     borderRadius: 14,
     borderWidth: 1,
@@ -1193,7 +1229,7 @@ const styles = StyleSheet.create({
   posterPlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1a283e',
+    backgroundColor: COLORS.cardBg,
   },
   vipTag: {
     alignSelf: 'flex-start',
@@ -1204,14 +1240,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   vipTagText: { color: '#000', fontSize: 10, fontWeight: '900' },
-  heroDramaTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  heroDramaTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
   heroSub: { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
   heroBtnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   cyanActionBtn: {
     backgroundColor: COLORS.cyan,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    minHeight: 46,
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 9,
   },
   cyanActionBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
   listActionBtn: {
@@ -1231,49 +1269,50 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     marginTop: 16,
   },
-  sectionHeaderTitle: { color: '#fff', fontSize: 17, fontWeight: '800', marginLeft: 16, marginTop: 14 },
+  sectionHeaderTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginLeft: 18, marginTop: 16 },
   seeAllText: { color: COLORS.cyan, fontSize: 13, fontWeight: '600' },
 
-  railList: { paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
+  railList: { paddingHorizontal: 18, paddingVertical: 10, gap: 10 },
   continueCard: {
-    width: 140,
+    width: 148,
     backgroundColor: COLORS.cardBg,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     overflow: 'hidden',
   },
   continuePosterPlaceholder: {
-    height: 75,
+    height: 84,
     backgroundColor: '#1a283e',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 6,
   },
   placeholderLabel: { color: COLORS.textMuted, fontSize: 11, textAlign: 'center', fontWeight: '600' },
-  progressTrackSmall: { height: 3, backgroundColor: '#0f172a', width: '100%' },
+  progressTrackSmall: { height: 3, backgroundColor: COLORS.cardBorder, width: '100%' },
   progressBarSmall: { height: '100%', backgroundColor: COLORS.cyan },
   cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8 },
   metaSmallText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
 
-  popularCard: { width: 125, height: 160, borderRadius: 10, overflow: 'hidden' },
+  popularCard: { width: 132, minHeight: 190, borderRadius: 12, overflow: 'hidden' },
+  popularPosterFrame: { width: 132, height: 154, borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: COLORS.cardBg },
   popularPosterPlaceholder: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
     backgroundColor: COLORS.cardBg,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-    borderRadius: 10,
-    padding: 8,
-    justifyContent: 'space-between',
+    borderRadius: 12,
   },
-  popularCardTitle: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  posterBadge: { position: 'absolute', left: 7, top: 7 },
+  popularCardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18, marginTop: 7 },
 
-  badgeVip: { alignSelf: 'flex-start', backgroundColor: COLORS.gold, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
-  badgeFree: { alignSelf: 'flex-start', backgroundColor: COLORS.green, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
-  badgeText: { color: '#000', fontSize: 9, fontWeight: '900' },
+  badgeVip: { alignSelf: 'flex-start', backgroundColor: COLORS.gold, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 5 },
+  badgeFree: { alignSelf: 'flex-start', backgroundColor: COLORS.green, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 5 },
+  badgeText: { color: '#17130b', fontSize: 11, fontWeight: '800' },
 
   // Drama Details View
-  dramaDescription: { color: COLORS.textMuted, fontSize: 13, marginTop: 12, lineHeight: 18 },
+  dramaDescription: { color: COLORS.textMuted, fontSize: 15, marginTop: 16, lineHeight: 23 },
+  descriptionToggle: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', marginTop: 2, paddingRight: 12 },
+  descriptionToggleText: { color: COLORS.cyan, fontSize: 15, fontWeight: '700' },
   cyanPrimaryBtn: {
     backgroundColor: COLORS.cyan,
     paddingVertical: 12,
@@ -1303,30 +1342,30 @@ const styles = StyleSheet.create({
   cyanSmallBtnText: { color: '#000', fontWeight: '800', fontSize: 12 },
 
   // Video Player Styles
-  playerContainer: { flex: 1, backgroundColor: '#000' },
-  playerTopBar: { flexDirection: 'row', alignItems: 'center', padding: 14 },
-  playerScreenTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 12, flex: 1 },
+  playerContainer: { flex: 1, backgroundColor: COLORS.bg },
+  playerTopBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 16 },
+  playerScreenTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginLeft: 14, flex: 1 },
   videoStage: {
     height: 320,
-    backgroundColor: '#050a12',
+    backgroundColor: COLORS.bg,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
   },
-  watermarkContainer: { position: 'absolute', top: 12, right: 12, zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5 },
-  watermarkText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  watermarkContainer: { position: 'absolute', top: 12, right: 12, zIndex: 99, backgroundColor: 'rgba(17,22,29,0.82)', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
+  watermarkText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 0.9 },
   emptyCatalog: { color: COLORS.textDim, fontSize: 13, textAlign: 'center', padding: 24 },
   adLoading: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
   adLoadingText: { color: '#fff', fontSize: 12, marginTop: 10 },
-  adErrorBackdrop: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#050a12' },
+  adErrorBackdrop: { alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.bg },
   adErrorText: { color: COLORS.textMuted, fontSize: 12, marginTop: 8 },
   adCard: {
     width: '90%',
-    backgroundColor: '#0d1829',
+    backgroundColor: COLORS.cardBg,
     borderWidth: 1,
     borderColor: COLORS.gold,
-    borderRadius: 10,
-    padding: 14,
+    borderRadius: 16,
+    padding: 20,
   },
   adHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   daiBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3 },
@@ -1335,11 +1374,11 @@ const styles = StyleSheet.create({
   adTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginTop: 8 },
   adActionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
   learnMoreText: { color: COLORS.cyan, fontSize: 12, fontWeight: '700' },
-  skipBtn: { backgroundColor: '#1e293b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  skipBtn: { backgroundColor: COLORS.cardBorder, minHeight: 48, justifyContent: 'center', paddingHorizontal: 18, borderRadius: 10 },
   skipBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   activeStreamBanner: { alignItems: 'center' },
   playerControlsArea: { padding: 16 },
-  progressTrack: { height: 4, backgroundColor: '#1e293b', borderRadius: 2 },
+  progressTrack: { height: 4, backgroundColor: COLORS.cardBorder, borderRadius: 2 },
   progressBar: { height: '100%', backgroundColor: COLORS.cyan, borderRadius: 2 },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   timeText: { color: COLORS.textMuted, fontSize: 11 },
@@ -1352,9 +1391,9 @@ const styles = StyleSheet.create({
   },
   ctrlSubText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   playPauseCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: COLORS.cyan,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1399,7 +1438,7 @@ const styles = StyleSheet.create({
   searchThumbPlaceholder: {
     width: 60,
     height: 60,
-    backgroundColor: '#1b293d',
+    backgroundColor: COLORS.cardBg,
     borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1612,15 +1651,15 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 60,
-    backgroundColor: '#0a1220',
+    height: 76,
+    backgroundColor: '#0d1a2b',
     borderTopWidth: 1,
     borderColor: COLORS.cardBorder,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
   },
-  navItem: { alignItems: 'center', justifyContent: 'center' },
-  navIcon: { color: COLORS.textDim, fontSize: 16 },
-  navLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '600', marginTop: 2 },
+  navItem: { alignItems: 'center', justifyContent: 'center', minWidth: 56, minHeight: 56, paddingHorizontal: 4 },
+  navIcon: { color: COLORS.textDim, fontSize: 20 },
+  navLabel: { color: COLORS.textDim, fontSize: 12, fontWeight: '600', marginTop: 3 },
 });
