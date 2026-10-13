@@ -3,8 +3,10 @@ export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface Episode {
   id: string;
   title: string;
+  contentType: 'MOVIE' | 'SERIES';
   duration: string;
   rating: string;
+  requiresVip: boolean;
 }
 
 export interface DramaItem {

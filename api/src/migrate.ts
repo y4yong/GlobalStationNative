@@ -46,5 +46,11 @@ await applySql(await readFile(path.resolve(rolesPath), 'utf8'));
 const contentArchivePath = fileURLToPath(new URL('../sql/006_content_archive.sql', import.meta.url));
 await applySql(await readFile(path.resolve(contentArchivePath), 'utf8'));
 
+const campaignReviewPath = fileURLToPath(new URL('../sql/007_campaign_review.sql', import.meta.url));
+await applySql(await readFile(path.resolve(campaignReviewPath), 'utf8'));
+
+const campaignAudiencePath = fileURLToPath(new URL('../sql/008_campaign_audience.sql', import.meta.url));
+await applySql(await readFile(path.resolve(campaignAudiencePath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

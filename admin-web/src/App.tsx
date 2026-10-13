@@ -26,6 +26,8 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import { api, login } from './api';
+import { formatDate, formatDateTime } from './formatDate';
+import { contentCategories, contentGenres } from './contentOptions';
 import globalStationLogo from '../../assets/brand/global-station-logo.png';
 
 type View =
@@ -81,7 +83,6 @@ function Login() {
       <form className="login-panel" onSubmit={submit}>
         <img className="brand-logo login-brand-logo" src={globalStationLogo} alt="Global Station" />
         <h2>Sign in to Control Room</h2>
-        <p className="muted">Administrator access only.</p>
         <label>
           Email
           <input
@@ -184,7 +185,6 @@ function App() {
             <div className="avatar">A</div>
             <span>
               <strong>Administrator</strong>
-              <small>Full access</small>
             </span>
           </div>
           <button
@@ -246,7 +246,7 @@ function ViewContent({
   if (view === 'overview') return <Overview overview={overview} />;
   if (view === 'content') return <ContentReview action={action} refresh={refresh} />;
   if (view === 'payouts') return <Payouts action={action} />;
-  if (view === 'campaigns') return <Campaigns action={action} />;
+  if (view === 'campaigns') return <Campaigns action={action} refresh={refresh} />;
   if (view === 'users') return <UsersView action={action} refresh={refresh} />;
   if (view === 'support')
     return <SupportTickets action={action} refresh={refresh} />;
@@ -258,30 +258,24 @@ function Overview({ overview }: { overview: any }) {
     {
       label: 'Pending content',
       value: overview?.dramas?.pending ?? '—',
-      note: 'needs review',
       icon: Film,
       tone: 'orange',
     },
     {
       label: 'Published library',
       value: overview?.dramas?.published ?? '—',
-      note: 'approved titles',
       icon: BadgeCheck,
       tone: 'green',
     },
     {
       label: 'Payouts waiting',
       value: overview?.payouts?.pending ?? '—',
-      note: `$${Number(overview?.payouts?.pendingAmount ?? 0).toFixed(
-        2,
-      )} queued`,
       icon: CircleDollarSign,
       tone: 'blue',
     },
     {
       label: '30-day sessions',
       value: overview?.watch?.sessions ?? '—',
-      note: `${overview?.watch?.activeUsers ?? 0} active viewers`,
       icon: BarChart3,
       tone: 'violet',
     },
@@ -290,11 +284,8 @@ function Overview({ overview }: { overview: any }) {
     <>
       <div className="page-intro">
         <div>
-          <p className="section-kicker">{new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date())}</p>
+          <p className="section-kicker">{formatDate(new Date())}</p>
           <h2>Operations overview</h2>
-          <p className="muted">
-            Here is what needs your attention across the station.
-          </p>
         </div>
         <div className="secure-badge">
           <ShieldCheck size={18} /> Audited workspace
@@ -310,7 +301,6 @@ function Overview({ overview }: { overview: any }) {
               </div>
               <p>{card.label}</p>
               <strong>{card.value}</strong>
-              <small>{card.note}</small>
             </article>
           );
         })}
@@ -518,7 +508,6 @@ function ContentReview({
         <PageTitle
           kicker="LIBRARY GOVERNANCE"
           title="Content review"
-          description="Review creator submissions, inspect every asset and detail, then publish or reject."
         />
         <div className="review-page-actions">
           <button className="secondary-button" onClick={() => setReload(value => value + 1)} disabled={loading}>
@@ -601,18 +590,7 @@ function ContentReview({
                 value={form.genre}
                 onChange={event => update('genre', event.target.value)}
               >
-                {[
-                  'Action',
-                  'Comedy',
-                  'Crime',
-                  'Documentary',
-                  'Drama',
-                  'Family',
-                  'Horror',
-                  'Romance',
-                  'Science Fiction',
-                  'Thriller',
-                ].map(value => (
+                {contentGenres.map(value => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
@@ -623,14 +601,7 @@ function ContentReview({
                 value={form.category}
                 onChange={event => update('category', event.target.value)}
               >
-                {[
-                  'Documentary',
-                  'Film',
-                  'Malay Drama',
-                  'Original Series',
-                  'Korean Drama',
-                  'Variety',
-                ].map(value => (
+                {contentCategories.map(value => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
@@ -687,9 +658,6 @@ function ContentReview({
             </label>
             <div className="wide-field">
               <span className="form-label">Origin point (optional)</span>
-              <p className="muted">
-                Click the map to choose coordinates, or enter them below.
-              </p>
               <CoordinatePicker
                 latitude={form.latitude}
                 longitude={form.longitude}
@@ -795,7 +763,7 @@ function ContentReview({
                   </div>
                 </td>
                 <td><strong>{row.creatorName ?? 'Unknown creator'}</strong><small className="table-sub">{row.creatorEmail ?? 'No creator email'}</small></td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
                 <td><strong>{row.contentType}</strong><small className="table-sub">{row.category} · {row.genre} · {row.rating}</small></td>
                 <td>{row.episodeCount}</td>
                 <td>
@@ -903,8 +871,8 @@ function ContentInspector({
             <section className="detail-section">
               <h3>Submission</h3>
               <dl className="detail-grid">
-                <div><dt>Submitted</dt><dd>{new Date(detail.createdAt).toLocaleString()}</dd></div>
-                <div><dt>Last updated</dt><dd>{detail.updatedAt ? new Date(detail.updatedAt).toLocaleString() : 'Not updated'}</dd></div>
+                <div><dt>Submitted</dt><dd>{formatDateTime(detail.createdAt)}</dd></div>
+                <div><dt>Last updated</dt><dd>{detail.updatedAt ? formatDateTime(detail.updatedAt) : 'Not updated'}</dd></div>
                 <div><dt>Content ID</dt><dd className="detail-code">{detail.id}</dd></div>
                 <div><dt>Episodes</dt><dd>{detail.episodes.length}</dd></div>
               </dl>
@@ -1005,7 +973,6 @@ function Payouts({
       <PageTitle
         kicker="REVENUE OPERATIONS"
         title="Payout approvals"
-        description="Review creator earnings before funds leave the platform."
       />
       <section className="panel table-panel">
         <table>
@@ -1025,7 +992,7 @@ function Payouts({
                   <strong>{row.creatorName}</strong>
                   <small className="table-sub">{row.creatorEmail}</small>
                 </td>
-                <td>{new Date(row.requestedAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.requestedAt)}</td>
                 <td className="amount">${Number(row.amount).toFixed(2)}</td>
                 <td>
                   <Status value={row.status} />
@@ -1070,26 +1037,57 @@ function Payouts({
 
 function Campaigns({
   action,
+  refresh,
 }: {
   action: (work: () => Promise<unknown>, message: string) => void;
+  refresh: number;
 }) {
   const [rows, setRows] = useState<any[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
+  const [selectedCampaign, setSelectedCampaign] = useState<any | null>(null);
   useEffect(() => {
+    let active = true;
+    setError('');
+    setLoading(true);
     api
       .campaigns()
-      .then(setRows)
-      .catch(() => setRows([]));
-  }, []);
+      .then(result => {
+        if (active) setRows(result);
+      })
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : 'Unable to load campaigns.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refresh, reload]);
+  const pendingCount = rows.filter(row => row.status === 'PENDING_REVIEW').length;
   return (
     <>
       <PageTitle
         kicker="ADVERTISING OPERATIONS"
         title="Campaign control"
-        description="Review submitted campaigns and activate or pause delivery."
       />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button className="secondary-button" disabled={loading} onClick={() => setReload(value => value + 1)}>
+          <RefreshCw size={15} /> Refresh campaigns
+        </button>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {loading && <div className="queue-message">Loading campaigns…</div>}
+      {!loading && pendingCount > 0 && (
+        <div className="campaign-review-notice">
+          <strong>{pendingCount} campaign{pendingCount === 1 ? '' : 's'} awaiting review</strong>
+        </div>
+      )}
       <div className="campaign-grid">
         {rows.map(row => (
-          <article className="panel campaign-card" key={row.id}>
+          <article className={`panel campaign-card${row.status === 'PENDING_REVIEW' ? ' pending-review' : ''}`} key={row.id}>
             <div className="campaign-top">
               <div className="campaign-symbol">
                 <Megaphone size={18} />
@@ -1097,7 +1095,12 @@ function Campaigns({
               <Status value={row.status} />
             </div>
             <h3>{row.campaignName}</h3>
-            <p className="muted">Targeting {row.targetTier} viewers</p>
+            {row.status === 'PENDING_REVIEW' && <p className="muted">Awaiting administrator review</p>}
+            <p className="muted">Targeting {row.targetTier === 'ALL' ? 'all ad-supported viewers (VIP excluded)' : 'Free members'}</p>
+            <video className="campaign-preview" controls preload="metadata" src={row.creativeVideoUrl}>
+              Your browser does not support campaign video preview.
+            </video>
+            {row.clickThroughUrl && <a className="campaign-destination" href={row.clickThroughUrl} target="_blank" rel="noreferrer">Open destination page</a>}
             <div className="budget-line">
               <span>Budget remaining</span>
               <strong>RM {Number(row.remainingBudget).toLocaleString()}</strong>
@@ -1128,6 +1131,13 @@ function Campaigns({
                 >
                   Pause campaign
                 </button>
+              ) : row.status === 'PENDING_REVIEW' ? (
+                <button
+                  className="campaign-review-button"
+                  onClick={() => setSelectedCampaign(row)}
+                >
+                  <Eye size={15} /> Review campaign
+                </button>
               ) : row.status === 'PAUSED' ? (
                 <button
                   className="text-button"
@@ -1138,14 +1148,54 @@ function Campaigns({
                     )
                   }
                 >
-                  Activate campaign
+                  Resume campaign
                 </button>
               ) : null}
             </div>
           </article>
         ))}
       </div>
-      {rows.length === 0 && <Empty text="No campaigns have been created." />}
+      {!loading && !error && rows.length === 0 && <Empty text="No campaigns have been created." />}
+      {selectedCampaign && (
+        <div className="modal-backdrop" onMouseDown={event => {
+          if (event.target === event.currentTarget) setSelectedCampaign(null);
+        }}>
+          <section className="confirm-modal campaign-review-modal" role="dialog" aria-modal="true" aria-labelledby="campaign-review-title">
+            <button className="icon-button modal-close" aria-label="Close campaign review" onClick={() => setSelectedCampaign(null)}>
+              <X size={17} />
+            </button>
+            <span className="eyebrow">CAMPAIGN REVIEW</span>
+            <h2 id="campaign-review-title">{selectedCampaign.campaignName}</h2>
+            <video className="campaign-review-video" controls preload="metadata" src={selectedCampaign.creativeVideoUrl}>
+              Your browser does not support campaign video preview.
+            </video>
+            {selectedCampaign.clickThroughUrl && (
+              <a className="campaign-destination" href={selectedCampaign.clickThroughUrl} target="_blank" rel="noreferrer">
+                Open destination page
+              </a>
+            )}
+            <dl className="campaign-review-details">
+              <div><dt>Audience</dt><dd>{selectedCampaign.targetTier === 'ALL' ? 'All ad-supported viewers (VIP excluded)' : 'Free members'}</dd></div>
+              <div><dt>CPM</dt><dd>RM {Number(selectedCampaign.cpmRate).toFixed(2)}</dd></div>
+              <div><dt>Total budget</dt><dd>RM {Number(selectedCampaign.totalBudget).toLocaleString()}</dd></div>
+            </dl>
+            <div className="campaign-review-actions">
+              <button className="reject-button" onClick={() => {
+                setSelectedCampaign(null);
+                action(() => api.campaignStatus(selectedCampaign.id, 'REJECTED'), 'Campaign rejected.');
+              }}>
+                Reject
+              </button>
+              <button className="campaign-approve-button" onClick={() => {
+                setSelectedCampaign(null);
+                action(() => api.campaignStatus(selectedCampaign.id, 'ACTIVE'), 'Campaign approved and activated.');
+              }}>
+                Approve &amp; activate
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -1219,7 +1269,6 @@ function UsersView({
       <PageTitle
         kicker="IDENTITY & ACCESS"
         title="Users"
-        description="Search accounts, filter membership, and manage plans."
       />
       <div className="user-filters">
         <label className="user-search">
@@ -1287,14 +1336,14 @@ function UsersView({
                     (row.isVip ? 'VIP' : 'FREE')}
                   {row.renewsAt && (
                     <small className="table-sub">
-                      Until {new Date(row.renewsAt).toLocaleDateString()}
+                      Until {formatDate(row.renewsAt)}
                     </small>
                   )}
                 </td>
                 <td>
                   <Status value={row.status} />
                 </td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
                 <td>
                   <button
                     className="text-button"
@@ -1413,7 +1462,6 @@ function SupportTickets({
       <PageTitle
         kicker="CUSTOMER CARE"
         title="Support tickets"
-        description="Review customer requests and update their status."
       />
       <section className="panel table-panel">
         <table>
@@ -1455,7 +1503,7 @@ function SupportTickets({
                     <option value="CLOSED">Closed</option>
                   </select>
                 </td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -1482,13 +1530,11 @@ function Telemetry() {
       <PageTitle
         kicker="AUDIENCE INTELLIGENCE"
         title="Watch telemetry"
-        description="A 14-day view of playback activity reported by mobile clients."
       />
       <section className="panel chart-panel">
         <div className="panel-heading">
           <div>
             <h3>Watch minutes</h3>
-            <p className="muted">Daily playback duration</p>
           </div>
           <BarChart3 size={20} />
         </div>
@@ -1521,17 +1567,14 @@ function Telemetry() {
 function PageTitle({
   kicker,
   title,
-  description,
 }: {
   kicker: string;
   title: string;
-  description: string;
 }) {
   return (
     <div className="page-title">
       <p className="section-kicker">{kicker}</p>
       <h2>{title}</h2>
-      <p className="muted">{description}</p>
     </div>
   );
 }

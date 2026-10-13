@@ -10,7 +10,6 @@ export const registerSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().email(),
   password: z.string().min(8),
-  role: z.enum(['VIEWER', 'CREATOR', 'ADVERTISER']).default('VIEWER'),
 });
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
@@ -29,25 +28,21 @@ function createSession(user: Pick<AuthenticatedUser, 'id' | 'role'> & { roles?: 
   };
 }
 
-export async function register(name: string, email: string, password: string, role: UserRole = 'VIEWER'): Promise<LoginResult | null> {
+export async function register(name: string, email: string, password: string): Promise<LoginResult | null> {
   const passwordHash = await bcrypt.hash(password, 12);
-  const safeRole: UserRole = role === 'CREATOR' || role === 'ADVERTISER' ? role : 'VIEWER';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows } = await client.query<{ id: string; role: UserRole }>(
       'INSERT INTO users (name, email, password_hash, role) VALUES ($1, lower($2), $3, $4) ON CONFLICT (email) DO NOTHING RETURNING id, role',
-      [name.trim(), email, passwordHash, safeRole],
+      [name.trim(), email, passwordHash, 'VIEWER'],
     );
     if (!rows[0]) {
       await client.query('ROLLBACK');
       return null;
     }
-    if (safeRole === 'CREATOR' || safeRole === 'ADVERTISER') {
-      await client.query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING', [rows[0].id, safeRole]);
-    }
     await client.query('COMMIT');
-    return createSession({ ...rows[0], roles: [safeRole] });
+    return createSession({ ...rows[0], roles: ['VIEWER'] });
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

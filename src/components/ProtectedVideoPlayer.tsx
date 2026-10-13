@@ -64,6 +64,10 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
   return <Video
     source={{ uri: stream.manifestUrl }}
     paused={paused}
+    muted={false}
+    volume={1}
+    audioOutput="speaker"
+    ignoreSilentSwitch="ignore"
     controls
     resizeMode="contain"
     viewType={ViewType.TEXTURE}

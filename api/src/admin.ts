@@ -3,15 +3,14 @@ import { z } from 'zod';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
-import { signAdminPlaybackUrl, signPlaybackUrl } from './mediaStorage.js';
+import { signAdminPlaybackUrl } from './mediaStorage.js';
+import { contentCategories, contentGenres } from './contentOptions.js';
 
 interface AdminRequest extends Request { adminUserId?: string }
 const contentStatuses = ['DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED'] as const;
 const payoutStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'] as const;
-const campaignStatuses = ['ACTIVE', 'PAUSED', 'COMPLETED'] as const;
+const campaignStatuses = ['PENDING_REVIEW', 'ACTIVE', 'PAUSED', 'REJECTED', 'COMPLETED'] as const;
 const supportStatuses = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const;
-const contentGenres = ['Action', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Horror', 'Romance', 'Science Fiction', 'Thriller'] as const;
-const contentCategories = ['Documentary', 'Film', 'Malay Drama', 'Original Series', 'Korean Drama', 'Variety'] as const;
 const contentRatings = ['U', 'P12', 'P13', '16', '18'] as const;
 const subscriptionPlans = ['FREE', 'VIP_MONTHLY', 'VIP_YEARLY'] as const;
 
@@ -148,8 +147,56 @@ export async function adminSetUserPlan(id: string, plan: string, confirmation: s
     client.release();
   }
 }
-export async function adminCampaigns() { return (await pool.query('SELECT id, campaign_name AS "campaignName", creative_video_url AS "creativeVideoUrl", cpm_rate AS "cpmRate", total_budget AS "totalBudget", remaining_budget AS "remainingBudget", target_tier AS "targetTier", status, created_at AS "createdAt" FROM ad_campaigns ORDER BY created_at DESC LIMIT 200')).rows; }
-export async function updateCampaignStatus(id: string, status: string, userId?: string) { const parsed = z.enum(campaignStatuses).parse(status); const result = await pool.query('UPDATE ad_campaigns SET status = $1 WHERE id = $2', [parsed, id]); if (!result.rowCount) throw Object.assign(new Error('Campaign not found'), { statusCode: 404 }); await audit(userId, `CAMPAIGN_${parsed}`, 'CAMPAIGN', id, { status: parsed }); return { id, status: parsed }; }
+export async function adminCampaigns() {
+  const { rows } = await pool.query<{
+    id: string;
+    campaignName: string;
+    creativeVideoUrl: string;
+    clickThroughUrl: string | null;
+    cpmRate: string;
+    totalBudget: string;
+    remainingBudget: string;
+    targetTier: string;
+    status: string;
+    createdAt: Date;
+  }>('SELECT id, campaign_name AS "campaignName", creative_video_url AS "creativeVideoUrl", click_through_url AS "clickThroughUrl", cpm_rate AS "cpmRate", total_budget AS "totalBudget", remaining_budget AS "remainingBudget", target_tier AS "targetTier", status, created_at AS "createdAt" FROM ad_campaigns ORDER BY created_at DESC LIMIT 200');
+  return rows.map(campaign => ({
+    ...campaign,
+    creativeVideoUrl: signAdminPlaybackUrl(campaign.creativeVideoUrl),
+  }));
+}
+export async function updateCampaignStatus(id: string, status: string, userId?: string) {
+  const parsed = z.enum(campaignStatuses).parse(status);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query<{ status: typeof campaignStatuses[number] }>(
+      'SELECT status FROM ad_campaigns WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const currentStatus = rows[0]?.status;
+    if (!currentStatus) throw Object.assign(new Error('Campaign not found'), { statusCode: 404 });
+    const allowedTransitions: Record<typeof campaignStatuses[number], readonly string[]> = {
+      PENDING_REVIEW: ['ACTIVE', 'REJECTED'],
+      ACTIVE: ['PAUSED', 'COMPLETED'],
+      PAUSED: ['ACTIVE'],
+      REJECTED: [],
+      COMPLETED: [],
+    };
+    if (!allowedTransitions[currentStatus].includes(parsed)) {
+      throw Object.assign(new Error(`Campaign cannot move from ${currentStatus} to ${parsed}.`), { statusCode: 409 });
+    }
+    await client.query('UPDATE ad_campaigns SET status = $1 WHERE id = $2', [parsed, id]);
+    await audit(userId, `CAMPAIGN_${parsed}`, 'CAMPAIGN', id, { previousStatus: currentStatus, status: parsed });
+    await client.query('COMMIT');
+    return { id, status: parsed };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 export async function adminTelemetry() { return (await pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, COUNT(DISTINCT session_uid)::int AS sessions, COALESCE(SUM(watch_seconds), 0)::int AS "watchSeconds", COUNT(DISTINCT user_id)::int AS viewers FROM watch_logs WHERE created_at >= now() - interval '14 days' GROUP BY created_at::date ORDER BY day`)).rows; }
 export async function adminPayouts() { return (await pool.query('SELECT p.id, p.amount, p.status, p.requested_at AS "requestedAt", p.processed_at AS "processedAt", u.name AS "creatorName", u.email AS "creatorEmail" FROM payout_requests p JOIN users u ON u.id = p.creator_id ORDER BY p.requested_at DESC LIMIT 200')).rows; }
 export async function updatePayoutStatus(id: string, status: string, userId?: string) { const parsed = z.enum(payoutStatuses).parse(status); const result = await pool.query('UPDATE payout_requests SET status = $1, processed_at = CASE WHEN $1 IN (\'APPROVED\',\'REJECTED\',\'PAID\') THEN now() ELSE NULL END, processed_by = $2 WHERE id = $3', [parsed, userId ?? null, id]); if (!result.rowCount) throw Object.assign(new Error('Payout not found'), { statusCode: 404 }); await audit(userId, `PAYOUT_${parsed}`, 'PAYOUT', id, { status: parsed }); return { id, status: parsed }; }

@@ -110,9 +110,9 @@ Copy the non-secret variable names from `api/.env.integrations.example` into `ap
 
 Billplz starts in sandbox mode. Configure its sandbox API key, collection ID, X Signature key, and an HTTPS `PUBLIC_API_URL` that Billplz can reach for callbacks. `localhost` is not reachable from Billplz; use a deployed HTTPS API or a secure development tunnel. VIP checkout uses server-configured MYR amounts and grants a fixed monthly/yearly term after a signature- and amount-verified callback; automatic recurring billing is not configured.
 
-Advertisers can submit HTTPS creatives and budgets. New campaigns start paused for administrator activation. Support tickets are stored for the customer and can be managed from the admin console. Provider-dependent routes return an explicit configuration error until their account settings are complete; no fake payment, media, ad, or ticket success is generated.
+Advertisers can submit HTTPS creatives and budgets. New campaigns target free members because VIP membership is ad-free; VIP members never receive ads, including campaigns targeted at all ad-supported viewers. New campaigns remain pending review and cannot reach viewers until an administrator approves and activates them. Support tickets are stored for the customer and can be managed from the admin console. Provider-dependent routes return an explicit configuration error until their account settings are complete; no fake payment, media, ad, or ticket success is generated.
 
-The mobile viewer flow supports account registration and sign-in through the API. The current API does not include a first-administrator provisioning command; create an administrator through a separately secured operational process before using the admin console on a fresh database.
+The mobile viewer flow supports account registration and sign-in through the API. Every new account starts as a Basic user (Viewer); Creator and Advertiser roles can be added from the profile after reviewing and confirming the change. The current API does not include a first-administrator provisioning command; create an administrator through a separately secured operational process before using the admin console on a fresh database.
 
 ## Admin Web
 
@@ -124,7 +124,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` and sign in with an administrator account provisioned in the database. The console supports content approval/rejection, payout decisions, campaign pause/resume, user review, platform metrics, watch telemetry, and audited admin actions.
+Open `http://localhost:5173` and sign in with an administrator account provisioned in the database. The console supports content approval/rejection, payout decisions, campaign approval/rejection and pause/resume, user review, platform metrics, watch telemetry, and audited admin actions.
 
 # Learn More
 

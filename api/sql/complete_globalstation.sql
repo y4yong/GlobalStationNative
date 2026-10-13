@@ -135,9 +135,9 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   cpm_rate NUMERIC(10,2) NOT NULL CHECK (cpm_rate >= 0),
   total_budget NUMERIC(12,2) NOT NULL CHECK (total_budget >= 0),
   remaining_budget NUMERIC(12,2) NOT NULL CHECK (remaining_budget >= 0),
-  target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE' CHECK (target_tier IN ('ALL', 'FREE', 'VIP')),
+  target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE' CHECK (target_tier IN ('ALL', 'FREE')),
   target_regions geography(MultiPolygon, 4326),
-  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAUSED', 'COMPLETED')),
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'ACTIVE', 'PAUSED', 'REJECTED', 'COMPLETED')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS click_through_url TEXT;

@@ -46,9 +46,9 @@ export async function loginViewer(email: string, password: string): Promise<View
   return getViewerProfile();
 }
 
-export async function registerViewer(name: string, email: string, password: string, role: UserRole = 'VIEWER'): Promise<ViewerProfile> {
+export async function registerViewer(name: string, email: string, password: string): Promise<ViewerProfile> {
   const session = await request<SessionResponse>('/auth/register', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password, role }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }),
   });
   await persistSession(session);
   return getViewerProfile();
@@ -157,8 +157,8 @@ export interface AdvertiserCampaign {
   cpmRate: string;
   totalBudget: string;
   remainingBudget: string;
-  targetTier: 'ALL' | 'FREE' | 'VIP';
-  status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
+  targetTier: 'ALL' | 'FREE';
+  status: 'PENDING_REVIEW' | 'ACTIVE' | 'PAUSED' | 'REJECTED' | 'COMPLETED';
   impressions: number;
 }
 
@@ -210,6 +210,30 @@ export function getCreatorDashboard(): Promise<CreatorDashboard> {
 export function archiveCreatorContent(id: string, archived: boolean) {
   return request<{ id: string; isArchived: boolean }>(`/creator/submissions/${encodeURIComponent(id)}/archive`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }),
+  });
+}
+
+export function updateCreatorContent(id: string, input: {
+  title: string;
+  description: string;
+  rating: string;
+  genre: string;
+  category: string;
+  isExclusiveVip: boolean;
+  posterKey?: string;
+}) {
+  return request<{ id: string; status: 'IN_REVIEW' }>(`/creator/submissions/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  });
+}
+
+export function addCreatorEpisode(id: string, input: {
+  title: string;
+  durationSeconds: number;
+  mediaKey: string;
+}) {
+  return request<{ id: string; episodeNumber: number; status: 'IN_REVIEW' }>(`/creator/submissions/${encodeURIComponent(id)}/episodes`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
 }
 
@@ -265,7 +289,7 @@ export function createAdvertiserCampaign(input: {
   clickThroughUrl: string;
   cpmRate: number;
   totalBudget: number;
-  targetTier: AdvertiserCampaign['targetTier'];
+  targetTier: 'FREE';
 }) {
   return request<{ id: string; status: AdvertiserCampaign['status'] }>('/advertiser/campaigns', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),

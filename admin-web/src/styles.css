@@ -426,7 +426,6 @@ td small,
   display: flex;
   align-items: center;
   gap: 11px;
-  min-width: 270px;
 }
 .poster {
   width: 29px;
@@ -495,6 +494,20 @@ td small,
 .campaign-card h3 {
   font: 500 20px Newsreader, serif;
   margin: 24px 0 4px;
+}
+.campaign-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #10151a;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.campaign-destination {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 12px;
 }
 .budget-line {
   margin-top: 24px;
@@ -1451,4 +1464,108 @@ td small, .table-sub { color: #526177; font-size: 13px; }
   .user-filters .user-search { grid-column: 1; }
   .coordinate-fields { grid-template-columns: 1fr; }
   .coordinate-fields .text-button { grid-column: 1; }
+}
+.campaign-review-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #e8c982;
+  border-left: 4px solid #a87925;
+  border-radius: 8px;
+  background: #fff9eb;
+  color: #684f24;
+}
+.campaign-card.pending-review {
+  border-color: #d7b669;
+  box-shadow: 0 6px 22px #a8792514;
+}
+.campaign-review-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #8c6724;
+  border-radius: 8px;
+  background: #8c6724;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.campaign-review-button:hover { background: #73531e; }
+.campaign-review-modal {
+  width: min(660px, 100%);
+  max-height: min(90vh, 900px);
+  overflow-y: auto;
+}
+.campaign-review-modal .modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.campaign-review-video {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  margin-top: 18px;
+  border-radius: 8px;
+  background: #101820;
+}
+.campaign-review-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.campaign-review-details div {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.campaign-review-details dt {
+  margin-bottom: 5px;
+  color: #526177;
+}
+.campaign-review-details dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+.campaign-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.campaign-review-actions .campaign-approve-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 1px solid #176b57;
+  border-radius: 8px;
+  background: #176b57;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.campaign-review-actions .campaign-approve-button:hover {
+  border-color: #105642;
+  background: #105642;
+}
+@media (max-width: 520px) {
+  .campaign-review-details { grid-template-columns: 1fr; }
+  .campaign-review-actions > button { flex: 1; }
+}
+.review-drawer .approve-button {
+  background: #fff;
+  border-color: #cbd4df;
+  color: #176b57;
 }
