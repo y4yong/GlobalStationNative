@@ -52,5 +52,14 @@ await applySql(await readFile(path.resolve(campaignReviewPath), 'utf8'));
 const campaignAudiencePath = fileURLToPath(new URL('../sql/008_campaign_audience.sql', import.meta.url));
 await applySql(await readFile(path.resolve(campaignAudiencePath), 'utf8'));
 
+const audienceAnalyticsPath = fileURLToPath(new URL('../sql/009_audience_analytics.sql', import.meta.url));
+await applySql(await readFile(path.resolve(audienceAnalyticsPath), 'utf8'));
+
+const engagementPath = fileURLToPath(new URL('../sql/010_engagement_referrals.sql', import.meta.url));
+await applySql(await readFile(path.resolve(engagementPath), 'utf8'));
+
+const dualPosterPath = fileURLToPath(new URL('../sql/011_dual_content_posters.sql', import.meta.url));
+await applySql(await readFile(path.resolve(dualPosterPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

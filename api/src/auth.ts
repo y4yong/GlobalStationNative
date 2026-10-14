@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
+import { trackSignupCode } from './engagement.js';
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(8) });
 export const registerSchema = z.object({
@@ -28,7 +29,7 @@ function createSession(user: Pick<AuthenticatedUser, 'id' | 'role'> & { roles?: 
   };
 }
 
-export async function register(name: string, email: string, password: string): Promise<LoginResult | null> {
+export async function register(name: string, email: string, password: string, referralCode?: string): Promise<LoginResult | null> {
   const passwordHash = await bcrypt.hash(password, 12);
   const client = await pool.connect();
   try {
@@ -41,6 +42,7 @@ export async function register(name: string, email: string, password: string): P
       await client.query('ROLLBACK');
       return null;
     }
+    await trackSignupCode(client, rows[0].id, referralCode);
     await client.query('COMMIT');
     return createSession({ ...rows[0], roles: ['VIEWER'] });
   } catch (error) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Video, { ViewType } from 'react-native-video';
 import { authorizePlayback, recordPlaybackProgress } from '../api/client';
@@ -15,33 +15,62 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const duration = useRef(0);
-  const playbackProgress = useRef({ episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 });
+  const playbackProgress = useRef({
+    episodeId,
+    sessionUid: createSessionFingerprint(),
+    lastTime: null as number | null,
+    pendingSeconds: 0,
+    positionSeconds: 0,
+    completed: false,
+  });
 
-  useEffect(() => {
-    const session = { episodeId, sessionUid: createSessionFingerprint(), lastTime: null as number | null, pendingSeconds: 0 };
-    playbackProgress.current = session;
-    return () => {
-      const seconds = Math.floor(session.pendingSeconds);
-      if (seconds > 0) void recordPlaybackProgress(episodeId, session.sessionUid, seconds).catch(() => undefined);
-    };
+  const flushProgress = useCallback((completed = false, finalPosition?: number) => {
+    const session = playbackProgress.current;
+    const seconds = Math.min(60, Math.floor(session.pendingSeconds));
+    session.completed ||= completed;
+    if (seconds < 1 && !session.completed) return;
+    session.pendingSeconds -= seconds;
+    if (typeof finalPosition === 'number') session.positionSeconds = Math.floor(finalPosition);
+    const completionForRequest = session.completed;
+    recordPlaybackProgress(
+      episodeId,
+      session.sessionUid,
+      seconds,
+      session.positionSeconds,
+      duration.current > 0 ? Math.floor(duration.current) : null,
+      completionForRequest,
+    ).then(() => {
+      if (completionForRequest) session.completed = false;
+    }).catch((reportError: unknown) => {
+      session.pendingSeconds += seconds;
+      session.completed ||= completionForRequest;
+      console.warn('Playback analytics could not be recorded.', reportError);
+    });
   }, [episodeId]);
 
-  function flushProgress() {
-    const session = playbackProgress.current;
-    const seconds = Math.floor(session.pendingSeconds);
-    if (seconds < 1) return;
-    session.pendingSeconds -= seconds;
-    void recordPlaybackProgress(episodeId, session.sessionUid, seconds).catch(() => {
-      session.pendingSeconds += seconds;
-    });
-  }
+  useEffect(() => {
+    const session = {
+      episodeId,
+      sessionUid: createSessionFingerprint(),
+      lastTime: null as number | null,
+      pendingSeconds: 0,
+      positionSeconds: 0,
+      completed: false,
+    };
+    duration.current = 0;
+    playbackProgress.current = session;
+    return () => {
+      flushProgress();
+    };
+  }, [episodeId, flushProgress]);
 
   function trackProgress(currentTime: number) {
     const session = playbackProgress.current;
+    session.positionSeconds = Math.floor(currentTime);
     if (session.lastTime !== null) {
       const elapsed = currentTime - session.lastTime;
       if (elapsed > 0 && elapsed <= 10) session.pendingSeconds += elapsed;
-      if (session.pendingSeconds >= 15) flushProgress();
+      if (session.pendingSeconds >= 15 || session.completed) flushProgress();
     }
     session.lastTime = currentTime;
   }
@@ -77,7 +106,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
       trackProgress(currentTime);
       onPlaybackProgress?.(currentTime, duration.current);
     }}
-    onEnd={flushProgress}
+    onEnd={() => flushProgress(true, duration.current)}
     onError={() => setError('Playback failed. Check the media URL and try again.')}
   />;
 }

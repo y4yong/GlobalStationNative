@@ -33,6 +33,167 @@ export async function adminOverview() {
   return { dramas: dramas.rows[0], users: users.rows[0], watch: watch.rows[0], campaigns: campaigns.rows[0], payouts: payouts.rows[0] };
 }
 
+export async function adminAnalytics() {
+  const [summary, daily, programmes, devices, geography, advertising, churn] = await Promise.all([
+    pool.query(`
+      WITH active AS (
+        SELECT COUNT(DISTINCT user_id) FILTER (WHERE activity_date >= current_date)::int AS dau,
+          COUNT(DISTINCT user_id) FILTER (WHERE activity_date >= current_date - interval '29 days')::int AS mau,
+          COUNT(DISTINCT user_id)::int AS unique_viewers,
+          COALESCE(SUM(watch_seconds), 0)::bigint AS watch_seconds
+        FROM viewer_activity
+        WHERE activity_date >= current_date - interval '29 days'
+      ), sessions AS (
+        SELECT user_id, session_uid, SUM(watch_seconds)::numeric AS seconds
+        FROM viewer_activity WHERE activity_date >= current_date - interval '29 days'
+        GROUP BY user_id, session_uid
+      ), playback AS (
+        SELECT COUNT(DISTINCT session_uid)::int AS playback_sessions,
+          COUNT(*) FILTER (WHERE completed_at IS NOT NULL)::int AS completions,
+          COUNT(*) FILTER (WHERE duration_seconds > 0)::int AS measurable_sessions,
+          COALESCE(AVG(last_position_seconds::numeric / NULLIF(duration_seconds, 0) * 100)
+            FILTER (WHERE completed_at IS NULL AND duration_seconds > 0), 0)::numeric(6,2) AS average_dropoff_percent
+        FROM watch_logs WHERE last_seen_at >= now() - interval '30 days'
+      ), subscribers AS (
+        SELECT COUNT(DISTINCT user_id)::int AS new_premium
+        FROM subscriptions WHERE plan_code IN ('VIP_MONTHLY', 'VIP_YEARLY')
+          AND started_at >= now() - interval '30 days'
+      ), cohort_conversions AS (
+        SELECT COUNT(DISTINCT s.user_id)::int AS total
+        FROM subscriptions s JOIN users u ON u.id = s.user_id
+        WHERE s.plan_code IN ('VIP_MONTHLY', 'VIP_YEARLY')
+          AND s.started_at >= now() - interval '30 days'
+          AND u.created_at >= now() - interval '30 days'
+      ), new_accounts AS (
+        SELECT COUNT(*)::int AS total
+        FROM users WHERE created_at >= now() - interval '30 days'
+      ), paid AS (
+        SELECT COALESCE(SUM(amount), 0)::numeric(12,2) AS revenue,
+          COUNT(DISTINCT user_id)::int AS paying_users
+        FROM payment_transactions
+        WHERE status = 'SUCCEEDED' AND currency = 'MYR' AND created_at >= now() - interval '30 days'
+      ), ad_revenue AS (
+        SELECT COALESCE(SUM(GREATEST(0.01, ROUND(c.cpm_rate / 10) / 100)), 0)::numeric(12,2) AS revenue
+        FROM ad_impressions i JOIN ad_campaigns c ON c.id = i.campaign_id
+        WHERE i.created_at >= now() - interval '30 days'
+      ), churn AS (
+        SELECT COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'CANCELLED' AND s.cancelled_at >= now() - interval '30 days')::int AS cancelled,
+          COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'ACTIVE' AND s.renews_at <= now()
+            AND s.renews_at >= now() - interval '30 days')::int AS term_ended,
+          COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'FAILED'
+            AND p.created_at >= now() - interval '30 days')::int AS failed_payments
+        FROM subscriptions s
+        LEFT JOIN payment_transactions p ON p.subscription_id = s.id
+      )
+      SELECT active.dau, active.mau, active.unique_viewers AS "uniqueViewers",
+        active.watch_seconds AS "watchSeconds", playback.playback_sessions AS "playbackSessions",
+        CASE WHEN playback.playback_sessions = 0 THEN 0
+          ELSE COALESCE(ROUND((SELECT AVG(seconds) FROM sessions)), 0)::int END AS "averageSessionSeconds",
+        playback.completions,
+        CASE WHEN playback.measurable_sessions = 0 THEN 0
+          ELSE ROUND(playback.completions::numeric / playback.measurable_sessions * 100, 2) END AS "completionRate",
+        playback.average_dropoff_percent AS "averageDropoffPercent",
+        subscribers.new_premium AS "newPremiumSubscribers",
+        new_accounts.total AS "newAccounts",
+        CASE WHEN new_accounts.total = 0 THEN 0
+            ELSE ROUND(cohort_conversions.total::numeric / new_accounts.total * 100, 2) END AS "freeToPremiumConversionRate",
+        paid.revenue::text AS "subscriptionRevenue",
+        ar.revenue::text AS "advertisingRevenue",
+        (paid.revenue + ar.revenue)::text AS "totalRevenue",
+        paid.paying_users AS "payingUsers",
+        CASE WHEN paid.paying_users = 0 THEN 0 ELSE ROUND(paid.revenue / paid.paying_users, 2) END AS "arpu",
+        CASE WHEN active.unique_viewers = 0 THEN 0
+          ELSE ROUND((paid.revenue + ar.revenue) / active.unique_viewers, 2) END AS "revenuePerViewer",
+        churn.cancelled, churn.term_ended AS "termEnded", churn.failed_payments AS "failedPayments",
+        CASE WHEN (SELECT COUNT(*) FROM subscriptions WHERE status = 'ACTIVE' AND (renews_at IS NULL OR renews_at > now())) + churn.cancelled + churn.term_ended = 0 THEN 0
+          ELSE ROUND((churn.cancelled + churn.term_ended)::numeric /
+            ((SELECT COUNT(*) FROM subscriptions WHERE status = 'ACTIVE' AND (renews_at IS NULL OR renews_at > now())) + churn.cancelled + churn.term_ended) * 100, 2)
+        END AS "churnRate"
+      FROM active, playback, subscribers, cohort_conversions, new_accounts, paid, ad_revenue ar, churn
+    `),
+    pool.query(`
+      SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
+        COUNT(DISTINCT activity.user_id)::int AS viewers,
+        COALESCE(SUM(activity.watch_seconds), 0)::bigint AS "watchSeconds",
+        COUNT(DISTINCT activity.session_uid)::int AS sessions
+      FROM generate_series(current_date - interval '29 days', current_date, interval '1 day') AS days(day)
+      LEFT JOIN viewer_activity activity ON activity.activity_date = days.day
+      GROUP BY days.day ORDER BY days.day
+    `),
+    pool.query(`
+      SELECT c.id, c.title, COUNT(DISTINCT w.session_uid)::int AS sessions,
+        COUNT(DISTINCT w.user_id)::int AS viewers, COALESCE(SUM(w.watch_seconds), 0)::bigint AS "watchSeconds",
+        COUNT(*) FILTER (WHERE w.completed_at IS NOT NULL)::int AS completions,
+        CASE WHEN COUNT(*) FILTER (WHERE w.duration_seconds > 0) = 0 THEN 0
+          ELSE ROUND(COUNT(*) FILTER (WHERE w.completed_at IS NOT NULL)::numeric /
+            COUNT(*) FILTER (WHERE w.duration_seconds > 0) * 100, 2) END AS "completionRate",
+        COALESCE(ROUND(AVG(w.last_position_seconds::numeric / NULLIF(w.duration_seconds, 0) * 100)
+          FILTER (WHERE w.completed_at IS NULL AND w.duration_seconds > 0), 2), 0) AS "dropoffPercent"
+      FROM watch_logs w JOIN episodes e ON e.id = w.episode_id
+      JOIN content c ON c.id = e.content_id
+      WHERE w.last_seen_at >= now() - interval '30 days'
+      GROUP BY c.id, c.title ORDER BY SUM(w.watch_seconds) DESC LIMIT 10
+    `),
+    pool.query(`
+      SELECT COALESCE(device_type, 'unknown') AS device,
+        COUNT(DISTINCT user_id)::int AS viewers,
+        COUNT(DISTINCT session_uid)::int AS sessions,
+        COALESCE(SUM(watch_seconds), 0)::bigint AS "watchSeconds"
+      FROM viewer_activity WHERE activity_date >= current_date - interval '29 days'
+      GROUP BY device_type ORDER BY viewers DESC
+    `),
+    pool.query(`
+      SELECT COALESCE(country_code, 'Unknown') AS country,
+        COUNT(DISTINCT user_id)::int AS viewers,
+        COUNT(DISTINCT session_uid)::int AS sessions
+      FROM viewer_activity WHERE activity_date >= current_date - interval '29 days'
+      GROUP BY country_code ORDER BY viewers DESC
+    `),
+    pool.query(`
+      SELECT c.id, c.campaign_name AS "campaignName",
+        COUNT(i.id)::int AS impressions, COUNT(i.completed_at)::int AS completions,
+        COUNT(DISTINCT clicks.impression_id)::int AS clicks,
+        CASE WHEN COUNT(i.id) = 0 THEN 0
+          ELSE ROUND(COUNT(DISTINCT clicks.impression_id)::numeric / COUNT(i.id) * 100, 2) END AS "clickThroughRate",
+        CASE WHEN COUNT(i.id) = 0 THEN 0
+          ELSE ROUND(COUNT(i.completed_at)::numeric / COUNT(i.id) * 100, 2) END AS "completionRate",
+        COALESCE(SUM(GREATEST(0.01, ROUND(c.cpm_rate / 10) / 100)), 0)::numeric(12,2)::text AS revenue
+      FROM ad_campaigns c
+      LEFT JOIN ad_impressions i ON i.campaign_id = c.id AND i.created_at >= now() - interval '30 days'
+      LEFT JOIN ad_clicks clicks ON clicks.impression_id = i.id
+      GROUP BY c.id, c.campaign_name ORDER BY COUNT(i.id) DESC LIMIT 20
+    `),
+    pool.query(`
+      SELECT u.id AS "userId", u.name, u.email, s.plan_code AS "planCode",
+        CASE
+          WHEN s.status = 'CANCELLED' THEN COALESCE(s.end_reason, 'CANCELLED')
+          WHEN s.status = 'ACTIVE' AND s.renews_at <= now() THEN 'TERM_ENDED'
+          ELSE COALESCE(p.failure_reason, 'PAYMENT_FAILED')
+        END AS reason,
+        GREATEST(COALESCE(s.cancelled_at, s.renews_at, p.created_at), p.created_at) AS "occurredAt"
+      FROM subscriptions s JOIN users u ON u.id = s.user_id
+      LEFT JOIN LATERAL (
+        SELECT failure_reason, created_at FROM payment_transactions
+        WHERE subscription_id = s.id AND status = 'FAILED'
+        ORDER BY created_at DESC LIMIT 1
+      ) p ON TRUE
+      WHERE (s.status = 'CANCELLED' AND s.cancelled_at >= now() - interval '30 days')
+        OR (s.status = 'ACTIVE' AND s.renews_at <= now() AND s.renews_at >= now() - interval '30 days')
+        OR p.created_at >= now() - interval '30 days'
+      ORDER BY "occurredAt" DESC LIMIT 100
+    `),
+  ]);
+  return {
+    summary: summary.rows[0],
+    daily: daily.rows,
+    programmes: programmes.rows,
+    devices: devices.rows,
+    geography: geography.rows,
+    advertising: advertising.rows,
+    churn: churn.rows,
+  };
+}
+
 export async function adminContent(status?: string) {
   const values: string[] = [];
   let where = '';
@@ -45,7 +206,8 @@ export async function adminContent(status?: string) {
 export async function adminContentDetail(id: string) {
   const { rows } = await pool.query(`
     SELECT c.id, c.title, c.content_type AS "contentType", c.description,
-      c.poster_url AS "posterReference", c.rating, c.genre, c.category,
+      c.poster_url AS "posterReference", c.poster_horizontal_url AS "posterHorizontalReference",
+      c.rating, c.genre, c.category,
       c.status, c.is_featured AS "isFeatured", c.is_exclusive_vip AS "isExclusiveVip",
       c.is_archived AS "isArchived",
       c.created_at AS "createdAt", c.updated_at AS "updatedAt",
@@ -66,6 +228,7 @@ export async function adminContentDetail(id: string) {
   return {
     ...content,
     posterUrl: content.posterReference ? signAdminPlaybackUrl(content.posterReference) : null,
+    posterHorizontalUrl: content.posterHorizontalReference ? signAdminPlaybackUrl(content.posterHorizontalReference) : null,
     episodes: content.episodes.map((episode: { mediaReference: string; [key: string]: unknown }) => ({
       ...episode,
       mediaUrl: signAdminPlaybackUrl(episode.mediaReference),
@@ -76,9 +239,9 @@ export async function adminContentDetail(id: string) {
 
 export async function createContent(input: unknown, userId?: string) {
   const isAllowedMediaReference = (value: string) => value.startsWith('s3://') || value.startsWith('https://') || (config.MEDIA_STORAGE_DRIVER === 'local' && value.startsWith('http://'));
-  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine(isAllowedMediaReference), rating: z.enum(contentRatings), genre: z.enum(contentGenres), category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine(isAllowedMediaReference), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
+  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine(isAllowedMediaReference), posterHorizontalUrl: z.string().refine(isAllowedMediaReference).optional(), rating: z.enum(contentRatings), genre: z.enum(contentGenres), category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine(isAllowedMediaReference), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
   const client = await pool.connect();
-  try { await client.query('BEGIN'); const origin = data.latitude !== undefined && data.longitude !== undefined ? `SRID=4326;POINT(${data.longitude} ${data.latitude})` : null; const content = await client.query<{ id: string }>('INSERT INTO content (title, content_type, description, poster_url, rating, genre, category, is_exclusive_vip, status, origin, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,\'APPROVED\',ST_GeogFromText($9),$10) RETURNING id', [data.title, data.contentType, data.description, data.posterUrl, data.rating, data.genre, data.category, data.isExclusiveVip, origin, userId ?? null]); await client.query('INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1, 1, $2, $3, $4, true)', [content.rows[0].id, data.episodeTitle, data.durationSeconds, data.hlsManifestUrl]); await client.query('COMMIT'); await audit(userId, 'CONTENT_CREATED', 'CONTENT', content.rows[0].id, { contentType: data.contentType }); return { id: content.rows[0].id }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  try { await client.query('BEGIN'); const origin = data.latitude !== undefined && data.longitude !== undefined ? `SRID=4326;POINT(${data.longitude} ${data.latitude})` : null; const content = await client.query<{ id: string }>('INSERT INTO content (title, content_type, description, poster_url, poster_horizontal_url, rating, genre, category, is_exclusive_vip, status, origin, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'APPROVED\',ST_GeogFromText($10),$11) RETURNING id', [data.title, data.contentType, data.description, data.posterUrl, data.posterHorizontalUrl ?? null, data.rating, data.genre, data.category, data.isExclusiveVip, origin, userId ?? null]); await client.query('INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1, 1, $2, $3, $4, true)', [content.rows[0].id, data.episodeTitle, data.durationSeconds, data.hlsManifestUrl]); await client.query('COMMIT'); await audit(userId, 'CONTENT_CREATED', 'CONTENT', content.rows[0].id, { contentType: data.contentType }); return { id: content.rows[0].id }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function updateContentStatus(id: string, status: string, userId?: string) { const parsed = z.enum(contentStatuses).parse(status); const result = await pool.query('UPDATE content SET status = $1, updated_at = now() WHERE id = $2', [parsed, id]); if (!result.rowCount) throw Object.assign(new Error('Content not found'), { statusCode: 404 }); await audit(userId, `CONTENT_${parsed}`, 'CONTENT', id, { status: parsed }); return { id, status: parsed }; }
@@ -131,7 +294,7 @@ export async function adminSetUserPlan(id: string, plan: string, confirmation: s
     await client.query('BEGIN');
     const user = await client.query<{ id: string }>('SELECT id FROM users WHERE id = $1 FOR UPDATE', [id]);
     if (!user.rowCount) throw Object.assign(new Error('User not found.'), { statusCode: 404 });
-    await client.query("UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = now() WHERE user_id = $1 AND status = 'ACTIVE'", [id]);
+    await client.query("UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = now(), end_reason = 'ADMIN_REVOKED' WHERE user_id = $1 AND status = 'ACTIVE'", [id]);
     await client.query('UPDATE users SET is_vip = FALSE, updated_at = now() WHERE id = $1', [id]);
     if (parsedPlan !== 'FREE') {
       const interval = parsedPlan === 'VIP_YEARLY' ? '1 year' : '1 month';

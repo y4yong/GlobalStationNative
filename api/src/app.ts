@@ -11,12 +11,27 @@ import { deleteContentPermanently, setContentArchived } from './contentLifecycle
 import { listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
-import { createVipCheckout, currentSubscription, processBillplzCallback } from './billing.js';
+import { createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
+import {
+  createEngagementCode,
+  createNotificationCampaign,
+  cancelNotificationCampaign,
+  getNotificationPreferences,
+  getReferralOverview,
+  listEngagementCodes,
+  listNotificationCampaigns,
+  listNotifications,
+  markNotificationRead,
+  sendNotificationCampaign,
+  setEngagementCodeActive,
+  updateNotificationPreferences,
+} from './engagement.js';
 import {
   adminCampaigns,
   adminContent,
   adminContentDetail,
   createContent,
+  adminAnalytics,
   adminOverview,
   adminPayouts,
   adminSupportTickets,
@@ -33,8 +48,10 @@ import {
 
 export const app = express();
 app.disable('x-powered-by');
+if (config.TRUST_PROXY === 'true') app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN }));
+app.use('/api/v1/payments/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use('/assets/ads', express.static(fileURLToPath(new URL('../assets/ads/', import.meta.url)), { maxAge: '1d' }));
@@ -42,6 +59,25 @@ app.use('/assets/ads', express.static(fileURLToPath(new URL('../assets/ads/', im
 app.get('/health', (_request, response) => {
   response.json({ status: 'ok', service: 'globalstation-api' });
 });
+
+const deviceTypeSchema = z.enum(['android', 'ios', 'web', 'other']);
+const notificationChannels = ['IN_APP', 'PUSH', 'EMAIL', 'SMS', 'WHATSAPP'] as const;
+function requestDeviceType(request: express.Request, supplied?: string) {
+  const clientType = deviceTypeSchema.safeParse(supplied ?? request.header('x-device-type'));
+  if (clientType.success) return clientType.data;
+  const agent = request.header('user-agent') ?? '';
+  if (/android/i.test(agent)) return 'android';
+  if (/iphone|ipad|ipod/i.test(agent)) return 'ios';
+  if (/mozilla|chrome|safari|firefox|edg/i.test(agent)) return 'web';
+  return 'other';
+}
+
+function requestCountryCode(request: express.Request) {
+  if (config.TRUST_PROXY !== 'true') return null;
+  const country = request.header('cf-ipcountry') ?? request.header('x-vercel-ip-country');
+  if (!country || !/^[a-z]{2}$/i.test(country) || country.toUpperCase() === 'XX') return null;
+  return country.toUpperCase();
+}
 
 if (config.MEDIA_STORAGE_DRIVER === 'local') {
   app.use('/uploads', (_request, response, next) => {
@@ -86,12 +122,14 @@ app.post('/api/v1/auth/login', async (request, response, next) => {
 
 app.post('/api/v1/auth/register', async (request, response, next) => {
   try {
-    const input = registerSchema.safeParse(request.body);
+    const input = registerSchema.extend({
+      referralCode: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/).optional(),
+    }).safeParse(request.body);
     if (!input.success) {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'A name, valid email, and password of at least 8 characters are required.' });
       return;
     }
-    const result = await register(input.data.name, input.data.email, input.data.password);
+    const result = await register(input.data.name, input.data.email, input.data.password, input.data.referralCode);
     if (!result) {
       response.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'An account already exists for this email.' });
       return;
@@ -125,6 +163,85 @@ app.post('/api/v1/auth/upgrade-role', requireAuthenticated, async (request, resp
 
 app.get('/api/v1/auth/me', requireAuthenticated, (request, response) => {
   response.json(getAuthenticatedUser(request));
+});
+
+app.get('/api/v1/notifications', requireAuthenticated, async (request, response, next) => {
+  try {
+    const parsedLimit = z.coerce.number().int().min(1).max(100).safeParse(request.query.limit ?? 50);
+    if (!parsedLimit.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Notification limit must be between 1 and 100.' });
+      return;
+    }
+    response.json(await listNotifications(getAuthenticatedUser(request).id, parsedLimit.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/notifications/:id/read', requireAuthenticated, async (request, response, next) => {
+  try {
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid notification ID is required.' });
+      return;
+    }
+    await markNotificationRead(getAuthenticatedUser(request).id, id.data);
+    response.sendStatus(204);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/notifications/read', requireAuthenticated, async (request, response, next) => {
+  try {
+    const result = await pool.query(`
+      UPDATE user_notifications SET status = 'READ', read_at = COALESCE(read_at, now())
+      WHERE user_id = $1 AND channel = 'IN_APP' AND read_at IS NULL
+    `, [getAuthenticatedUser(request).id]);
+    response.json({ updated: result.rowCount ?? 0 });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/notifications/preferences', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await getNotificationPreferences(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/notifications/preferences', requireAuthenticated, async (request, response, next) => {
+  try {
+    const input = z.object({
+      in_app: z.boolean().optional(),
+      push: z.boolean().optional(),
+      email: z.boolean().optional(),
+      sms: z.boolean().optional(),
+      whatsapp: z.boolean().optional(),
+    }).refine((preferences) => Object.keys(preferences).length > 0, 'At least one preference is required.').safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide at least one valid notification preference.' });
+      return;
+    }
+    const preferences = Object.fromEntries(
+      Object.entries(input.data)
+        .filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+        .map(([channel, enabled]) => [channel.toUpperCase(), enabled]),
+    ) as Partial<Record<(typeof notificationChannels)[number], boolean>>;
+    response.json(await updateNotificationPreferences(getAuthenticatedUser(request).id, preferences));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/referrals/me', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await getReferralOverview(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/v1/creator/dashboard', requireAuthenticated, async (request, response, next) => {
@@ -249,6 +366,7 @@ app.patch('/api/v1/creator/submissions/:id', requireAuthenticated, async (reques
       category: z.enum(contentCategories),
       isExclusiveVip: z.boolean(),
       posterKey: z.string().min(1).optional(),
+      posterHorizontalKey: z.string().min(1).optional(),
     }).safeParse(request.body);
     if (!id.success || !input.success) {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide valid content details and an optional uploaded poster.' });
@@ -256,6 +374,9 @@ app.patch('/api/v1/creator/submissions/:id', requireAuthenticated, async (reques
     }
     const posterUrl = input.data.posterKey
       ? await verifyCreatorPosterUpload(user.id, input.data.posterKey)
+      : undefined;
+    const posterHorizontalUrl = input.data.posterHorizontalKey
+      ? await verifyCreatorPosterUpload(user.id, input.data.posterHorizontalKey)
       : undefined;
     const client = await pool.connect();
     try {
@@ -269,11 +390,12 @@ app.patch('/api/v1/creator/submissions/:id', requireAuthenticated, async (reques
         UPDATE content
         SET title = $1, description = $2, rating = $3, genre = $4, category = $5,
           is_exclusive_vip = $6, poster_url = COALESCE($7, poster_url),
+          poster_horizontal_url = COALESCE($8, poster_horizontal_url),
           status = 'IN_REVIEW', updated_at = now()
-        WHERE id = $8 AND created_by = $9
+        WHERE id = $9 AND created_by = $10
       `, [
         input.data.title, input.data.description, input.data.rating, input.data.genre,
-        input.data.category, input.data.isExclusiveVip, posterUrl ?? null, id.data, user.id,
+        input.data.category, input.data.isExclusiveVip, posterUrl ?? null, posterHorizontalUrl ?? null, id.data, user.id,
       ]);
       await client.query('COMMIT');
       response.json({ id: id.data, status: 'IN_REVIEW' });
@@ -369,6 +491,7 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     contentType: z.enum(['MOVIE', 'SERIES']),
     description: z.string().trim().min(10),
     posterKey: z.string().min(1),
+    posterHorizontalKey: z.string().min(1),
     rating: z.enum(['U', 'P12', 'P13', '16', '18']),
     genre: z.enum(contentGenres),
     category: z.enum(contentCategories),
@@ -382,16 +505,17 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     return;
   }
   try {
-    const [posterUrl, mediaReference] = await Promise.all([
+    const [posterUrl, posterHorizontalUrl, mediaReference] = await Promise.all([
       verifyCreatorPosterUpload(user.id, input.data.posterKey),
+      verifyCreatorPosterUpload(user.id, input.data.posterHorizontalKey),
       verifyCreatorUpload(user.id, input.data.mediaKey),
     ]);
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const content = await client.query<{ id: string }>(
-        'INSERT INTO content (title, content_type, description, poster_url, rating, genre, category, is_exclusive_vip, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,\'IN_REVIEW\',$9) RETURNING id',
-        [input.data.title, input.data.contentType, input.data.description, posterUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
+        'INSERT INTO content (title, content_type, description, poster_url, poster_horizontal_url, rating, genre, category, is_exclusive_vip, status, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'IN_REVIEW\',$10) RETURNING id',
+        [input.data.title, input.data.contentType, input.data.description, posterUrl, posterHorizontalUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
       );
       await client.query(
         'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,1,$2,$3,$4,true)',
@@ -456,7 +580,11 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
   const input = z.object({
     episodeId: z.string().uuid(),
     sessionUid: z.string().trim().min(8).max(100),
-    watchSeconds: z.number().int().min(1).max(60),
+    watchSeconds: z.number().int().min(0).max(60),
+    positionSeconds: z.number().int().min(0).max(86_400),
+    durationSeconds: z.number().int().min(1).max(86_400).nullable(),
+    completed: z.boolean().default(false),
+    deviceType: deviceTypeSchema.optional(),
   }).safeParse(request.body);
   if (!input.success) {
     response.status(400).json({ error: 'INVALID_REQUEST', message: 'Valid playback progress is required.' });
@@ -484,13 +612,43 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
         'SELECT id FROM watch_logs WHERE session_uid = $1 AND episode_id = $2 ORDER BY id LIMIT 1 FOR UPDATE',
         [input.data.sessionUid, input.data.episodeId],
       );
+      const deviceType = requestDeviceType(request, input.data.deviceType);
+      const countryCode = requestCountryCode(request);
+      const completed = input.data.completed
+        && input.data.durationSeconds !== null
+        && input.data.positionSeconds >= input.data.durationSeconds * 0.9;
       if (existing.rows[0]) {
-        await client.query('UPDATE watch_logs SET watch_seconds = watch_seconds + $1 WHERE id = $2', [input.data.watchSeconds, existing.rows[0].id]);
+        await client.query(`
+          UPDATE watch_logs SET
+            watch_seconds = watch_seconds + $1,
+            last_seen_at = now(),
+            last_position_seconds = $2,
+            max_position_seconds = GREATEST(max_position_seconds, $2),
+            duration_seconds = GREATEST(COALESCE(duration_seconds, 0), COALESCE($3, 0)),
+            completed_at = CASE WHEN $4 THEN COALESCE(completed_at, now()) ELSE completed_at END,
+            device_type = COALESCE(device_type, $5),
+            country_code = COALESCE(country_code, $6)
+          WHERE id = $7
+        `, [input.data.watchSeconds, input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode, existing.rows[0].id]);
       } else {
         await client.query(
-          'INSERT INTO watch_logs (user_id, episode_id, watch_seconds, device_ip, session_uid) VALUES ($1, $2, $3, $4, $5)',
-          [user.id, input.data.episodeId, input.data.watchSeconds, request.ip ?? '127.0.0.1', input.data.sessionUid],
+          `INSERT INTO watch_logs
+            (user_id, episode_id, watch_seconds, device_ip, session_uid, last_seen_at, last_position_seconds,
+             max_position_seconds, duration_seconds, completed_at, device_type, country_code)
+           VALUES ($1, $2, $3, $4, $5, now(), $6, $6, $7, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10)`,
+          [user.id, input.data.episodeId, input.data.watchSeconds, request.ip ?? '127.0.0.1', input.data.sessionUid,
+            input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode],
         );
+      }
+      if (input.data.watchSeconds > 0) {
+        await client.query(`
+          INSERT INTO viewer_activity (user_id, session_uid, activity_date, watch_seconds, device_type, country_code)
+          VALUES ($1, $2, current_date, $3, $4, $5)
+          ON CONFLICT (user_id, session_uid, activity_date) DO UPDATE SET
+            watch_seconds = viewer_activity.watch_seconds + EXCLUDED.watch_seconds,
+            device_type = COALESCE(viewer_activity.device_type, EXCLUDED.device_type),
+            country_code = COALESCE(viewer_activity.country_code, EXCLUDED.country_code)
+        `, [user.id, input.data.sessionUid, input.data.watchSeconds, deviceType, countryCode]);
       }
       await client.query('COMMIT');
       response.sendStatus(204);
@@ -526,17 +684,25 @@ app.post('/api/v1/subscriptions/checkout', requireAuthenticated, async (request,
   }
 });
 
-app.post('/api/v1/payments/billplz/callback', async (request, response, next) => {
+app.post('/api/v1/payments/stripe/webhook', async (request, response, next) => {
   try {
-    await processBillplzCallback(request.body as Record<string, unknown>);
+    if (!Buffer.isBuffer(request.body)) {
+      response.status(400).json({ error: 'INVALID_WEBHOOK_PAYLOAD', message: 'Stripe webhook requires a raw JSON request body.' });
+      return;
+    }
+    await processStripeWebhook(request.body, request.header('stripe-signature'));
     response.sendStatus(200);
   } catch (error) {
     next(error);
   }
 });
 
-app.get('/api/v1/payments/billplz/return', (_request, response) => {
-  response.type('text/plain').send('Payment status is verified by Billplz callback. You may return to Global Station.');
+app.get('/api/v1/payments/stripe/return', (_request, response) => {
+  response.type('text/plain').send('Payment status is verified by Stripe. You may return to Global Station and refresh membership status.');
+});
+
+app.get('/api/v1/payments/stripe/cancel', (_request, response) => {
+  response.type('text/plain').send('Checkout was cancelled. No membership change was made.');
 });
 
 app.get('/api/v1/support/tickets', requireAuthenticated, async (request, response, next) => {
@@ -690,7 +856,11 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
     const creativeVideoUrl = signPlaybackUrl(campaign.creative_video_url);
     const cost = Math.max(0.01, Math.round(Number(campaign.cpm_rate) / 10) / 100);
     const address = request.ip ?? request.socket.remoteAddress ?? '127.0.0.1';
-    await client.query('INSERT INTO ad_impressions (campaign_id, user_id, device_ip) VALUES ($1,$2,$3)', [campaign.id, user.id, address]);
+    const impression = await client.query<{ id: string }>(
+      `INSERT INTO ad_impressions (campaign_id, user_id, device_ip, device_type, country_code)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id::text`,
+      [campaign.id, user.id, address, requestDeviceType(request), requestCountryCode(request)],
+    );
     await client.query(`
       UPDATE ad_campaigns
       SET remaining_budget = GREATEST(0, remaining_budget - $1),
@@ -700,6 +870,7 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
     await client.query('COMMIT');
     response.json({
       id: campaign.id,
+      impressionId: impression.rows[0].id,
       title: campaign.campaign_name,
       creativeVideoUrl,
       clickThroughUrl: campaign.click_through_url,
@@ -709,6 +880,62 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
     next(error);
   } finally {
     client.release();
+  }
+});
+
+app.post('/api/v1/ads/impressions/:id/progress', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().regex(/^\d+$/).safeParse(request.params.id);
+  const input = z.object({
+    positionSeconds: z.number().int().min(0).max(86_400),
+    durationSeconds: z.number().int().min(1).max(86_400),
+    completed: z.boolean().default(false),
+    deviceType: deviceTypeSchema.optional(),
+  }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Valid ad progress is required.' });
+    return;
+  }
+  try {
+    const completed = input.data.completed && input.data.positionSeconds >= input.data.durationSeconds * 0.9;
+    const result = await pool.query(`
+      UPDATE ad_impressions SET
+        watched_seconds = GREATEST(watched_seconds, $1),
+        creative_duration_seconds = GREATEST(COALESCE(creative_duration_seconds, 0), $2),
+        completed_at = CASE WHEN $3 THEN COALESCE(completed_at, now()) ELSE completed_at END,
+        device_type = COALESCE(device_type, $4)
+      WHERE id = $5::bigint AND user_id = $6
+      RETURNING id
+    `, [input.data.positionSeconds, input.data.durationSeconds, completed,
+      requestDeviceType(request, input.data.deviceType), id.data, getAuthenticatedUser(request).id]);
+    if (!result.rowCount) {
+      response.status(404).json({ error: 'AD_IMPRESSION_NOT_FOUND' });
+      return;
+    }
+    response.sendStatus(204);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/ads/impressions/:id/click', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().regex(/^\d+$/).safeParse(request.params.id);
+  if (!id.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid ad impression is required.' });
+    return;
+  }
+  try {
+    const impression = await pool.query<{ id: string }>(
+      'SELECT id::text FROM ad_impressions WHERE id = $1::bigint AND user_id = $2',
+      [id.data, getAuthenticatedUser(request).id],
+    );
+    if (!impression.rowCount) {
+      response.status(404).json({ error: 'AD_IMPRESSION_NOT_FOUND' });
+      return;
+    }
+    await pool.query('INSERT INTO ad_clicks (impression_id) VALUES ($1::bigint) ON CONFLICT DO NOTHING', [id.data]);
+    response.sendStatus(204);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -773,16 +1000,17 @@ app.post('/api/v1/admin/media/uploads', async (request, response, next) => {
 app.post('/api/v1/admin/content', async (request, response, next) => {
   try {
     const userId = getAdminUserId(request)!;
-    const input = z.object({ posterKey: z.string().min(1), mediaKey: z.string().min(1) }).safeParse(request.body);
+    const input = z.object({ posterKey: z.string().min(1), posterHorizontalKey: z.string().min(1), mediaKey: z.string().min(1) }).safeParse(request.body);
     if (!input.success) {
-      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Upload a supported poster image and MP4 media file first.' });
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Upload vertical and horizontal poster images and an MP4 media file first.' });
       return;
     }
-    const [posterUrl, hlsManifestUrl] = await Promise.all([
+    const [posterUrl, posterHorizontalUrl, hlsManifestUrl] = await Promise.all([
       verifyAdminUpload(userId, 'poster', input.data.posterKey),
+      verifyAdminUpload(userId, 'poster', input.data.posterHorizontalKey),
       verifyAdminUpload(userId, 'media', input.data.mediaKey),
     ]);
-    response.status(201).json(await createContent({ ...request.body, posterUrl, hlsManifestUrl }, userId));
+    response.status(201).json(await createContent({ ...request.body, posterUrl, posterHorizontalUrl, hlsManifestUrl }, userId));
   } catch (error) { next(error); }
 });
 
@@ -818,6 +1046,100 @@ app.patch('/api/v1/admin/campaigns/:id/status', async (request, response, next) 
 
 app.get('/api/v1/admin/telemetry', async (_request, response, next) => {
   try { response.json(await adminTelemetry()); } catch (error) { next(error); }
+});
+
+app.get('/api/v1/admin/analytics', async (_request, response, next) => {
+  try { response.json(await adminAnalytics()); } catch (error) { next(error); }
+});
+
+app.get('/api/v1/admin/engagement/campaigns', async (_request, response, next) => {
+  try { response.json(await listNotificationCampaigns()); } catch (error) { next(error); }
+});
+
+app.post('/api/v1/admin/engagement/campaigns', async (request, response, next) => {
+  try {
+    const input = z.object({
+      name: z.string().trim().min(2).max(120),
+      channel: z.enum(notificationChannels),
+      audience: z.enum(['ALL', 'FREE', 'VIP']).default('ALL'),
+      title: z.string().trim().min(1).max(160),
+      body: z.string().trim().min(1).max(2_000),
+      scheduledAt: z.string().datetime({ offset: true }).optional(),
+    }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid notification campaign.' });
+      return;
+    }
+    response.status(201).json(await createNotificationCampaign(input.data, getAdminUserId(request)!));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/admin/engagement/campaigns/:id/send', async (request, response, next) => {
+  try {
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid campaign ID is required.' });
+      return;
+    }
+    response.json(await sendNotificationCampaign(id.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/admin/engagement/campaigns/:id/cancel', async (request, response, next) => {
+  try {
+    const id = z.string().uuid().safeParse(request.params.id);
+    if (!id.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid campaign ID is required.' });
+      return;
+    }
+    response.json(await cancelNotificationCampaign(id.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/admin/engagement/codes', async (_request, response, next) => {
+  try { response.json(await listEngagementCodes()); } catch (error) { next(error); }
+});
+
+app.patch('/api/v1/admin/engagement/codes/:id', async (request, response, next) => {
+  try {
+    const id = z.string().uuid().safeParse(request.params.id);
+    const input = z.object({ isActive: z.boolean() }).safeParse(request.body);
+    if (!id.success || !input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid code ID and active state are required.' });
+      return;
+    }
+    response.json(await setEngagementCodeActive(id.data, input.data.isActive));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/admin/engagement/codes', async (request, response, next) => {
+  try {
+    const input = z.object({
+      code: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/).optional(),
+      codeType: z.enum(['CAMPAIGN', 'INFLUENCER', 'PROMOTION']),
+      ownerId: z.string().uuid().optional(),
+      rewardConfig: z.record(z.string(), z.unknown()).default({}),
+      maxRedemptions: z.number().int().positive().optional(),
+      startsAt: z.string().datetime({ offset: true }).optional(),
+      endsAt: z.string().datetime({ offset: true }).optional(),
+    }).refine((value) => !value.startsAt || !value.endsAt || Date.parse(value.startsAt) < Date.parse(value.endsAt),
+      'The code end time must be later than its start time.').safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide valid code details and an optional reward configuration.' });
+      return;
+    }
+    response.status(201).json(await createEngagementCode(input.data));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/v1/admin/payouts', async (_request, response, next) => {

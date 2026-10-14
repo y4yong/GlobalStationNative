@@ -25,13 +25,14 @@ import {
   TileLayer,
   useMapEvents,
 } from 'react-leaflet';
-import { api, login } from './api';
+import { AnalyticsData, api, login } from './api';
 import { formatDate, formatDateTime } from './formatDate';
 import { contentCategories, contentGenres } from './contentOptions';
 import globalStationLogo from '../../assets/brand/global-station-logo.png';
 
 type View =
   | 'overview'
+  | 'analytics'
   | 'content'
   | 'payouts'
   | 'campaigns'
@@ -40,6 +41,7 @@ type View =
   | 'support';
 const nav: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'analytics', label: 'Audience analytics', icon: BarChart3 },
   { id: 'content', label: 'Content review', icon: Film },
   { id: 'payouts', label: 'Payouts', icon: CircleDollarSign },
   { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
@@ -47,6 +49,11 @@ const nav: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'telemetry', label: 'Watch telemetry', icon: Activity },
   { id: 'support', label: 'Support tickets', icon: MessagesSquare },
 ];
+
+function getSavedView(): View {
+  const savedView = localStorage.getItem('gs_admin_view');
+  return nav.some(item => item.id === savedView) ? savedView as View : 'overview';
+}
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -112,12 +119,15 @@ function Login() {
 }
 
 function App() {
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>(getSavedView);
   const [mobileNav, setMobileNav] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [notice, setNotice] = useState('');
   const [overview, setOverview] = useState<any>(null);
   const token = localStorage.getItem('gs_admin_token');
+  useEffect(() => {
+    localStorage.setItem('gs_admin_view', view);
+  }, [view]);
   useEffect(() => {
     if (token)
       api
@@ -244,6 +254,7 @@ function ViewContent({
   refresh: number;
 }) {
   if (view === 'overview') return <Overview overview={overview} />;
+  if (view === 'analytics') return <AnalyticsDashboard refresh={refresh} />;
   if (view === 'content') return <ContentReview action={action} refresh={refresh} />;
   if (view === 'payouts') return <Payouts action={action} />;
   if (view === 'campaigns') return <Campaigns action={action} refresh={refresh} />;
@@ -251,6 +262,193 @@ function ViewContent({
   if (view === 'support')
     return <SupportTickets action={action} refresh={refresh} />;
   return <Telemetry />;
+}
+
+function AnalyticsDashboard({ refresh }: { refresh: number }) {
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    api.analytics().then(result => {
+      if (active) setData(result);
+    }).catch(requestError => {
+      if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load audience analytics.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [refresh]);
+
+  if (loading && !data) return <><PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" /><section className="panel"><p>Loading analytics…</p></section></>;
+  if (error && !data) return <><PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" /><section className="panel"><p className="form-error">{error}</p></section></>;
+  if (!data) return null;
+
+  const summary = data.summary;
+  const number = (key: string) => Number(summary[key] ?? 0);
+  const money = (value: unknown) => `RM ${Number(value ?? 0).toFixed(2)}`;
+  const duration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+  };
+  const dailyByDate = new Map(data.daily.map(row => [row.day, row]));
+  const latestDay = data.daily.length
+    ? new Date(`${data.daily[data.daily.length - 1].day}T00:00:00Z`)
+    : new Date();
+  const dailySeries = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(latestDay);
+    date.setUTCDate(date.getUTCDate() - (29 - index));
+    const day = date.toISOString().slice(0, 10);
+    return { day, viewers: Number(dailyByDate.get(day)?.viewers ?? 0) };
+  });
+  const deviceTotal = data.devices.reduce((total, row) => total + Number(row.viewers), 0);
+  const deviceColors = ['#287b68', '#d29b48', '#6987ae', '#9c7caa', '#abb5b0'];
+  const deviceGradient = deviceTotal ? data.devices.reduce((gradient, row, index) => {
+    const before = data.devices.slice(0, index).reduce((total, item) => total + Number(item.viewers), 0);
+    const after = before + Number(row.viewers);
+    const from = deviceTotal ? before / deviceTotal * 100 : 0;
+    const to = deviceTotal ? after / deviceTotal * 100 : 0;
+    return `${gradient}${index ? ', ' : ''}${deviceColors[index % deviceColors.length]} ${from}% ${to}%`;
+  }, '') : '#e8ede9 0% 100%';
+  const maxProgrammeWatch = Math.max(1, ...data.programmes.map(row => Number(row.watchSeconds)));
+  const maxCountryViewers = Math.max(1, ...data.geography.map(row => Number(row.viewers)));
+  const revenueTotal = Number(summary.totalRevenue ?? 0);
+  const subscriptionShare = revenueTotal ? Number(summary.subscriptionRevenue ?? 0) / revenueTotal * 100 : 0;
+  const advertisingShare = revenueTotal ? Number(summary.advertisingRevenue ?? 0) / revenueTotal * 100 : 0;
+  const formatDateLabel = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+  return (
+    <>
+      <PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" />
+      {error && <section className="panel"><p className="form-error">{error}</p></section>}
+      <div className="analytics-subhead">
+        <p className="muted">A 30-day view of audience growth, viewing behaviour, and revenue. Active viewers are measured from authenticated playback.</p>
+        <span className="analytics-period"><span /> LAST 30 DAYS</span>
+      </div>
+      <section className="analytics-kpis">
+        <article className="analytics-kpi"><span>Daily active viewers</span><strong>{number('dau').toLocaleString()}</strong><small>Today · playback activity</small></article>
+        <article className="analytics-kpi"><span>Monthly active viewers</span><strong>{number('mau').toLocaleString()}</strong><small>Unique viewers · 30 days</small></article>
+        <article className="analytics-kpi"><span>Watch time</span><strong>{duration(number('watchSeconds'))}</strong><small>Across {number('playbackSessions').toLocaleString()} playback sessions</small></article>
+        <article className="analytics-kpi"><span>Total revenue</span><strong>{money(summary.totalRevenue)}</strong><small>ARPU {money(summary.arpu)} · paying viewers</small></article>
+      </section>
+      <section className="analytics-growth-strip">
+        <div><span>Completion rate</span><strong>{number('completionRate').toFixed(1)}%</strong></div>
+        <div><span>Free → Premium</span><strong>{number('freeToPremiumConversionRate').toFixed(1)}%</strong><small>{number('newPremiumSubscribers').toLocaleString()} new subscribers</small></div>
+        <div><span>30-day churn</span><strong>{number('churnRate').toFixed(1)}%</strong><small>{(number('cancelled') + number('termEnded')).toLocaleString()} cancelled or expired</small></div>
+        <div><span>Avg. session watch time</span><strong>{duration(number('averageSessionSeconds'))}</strong><small>{number('failedPayments').toLocaleString()} failed checkouts</small></div>
+      </section>
+      <div className="analytics-grid analytics-grid-primary">
+        <section className="panel analytics-panel analytics-audience-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AUDIENCE TREND</p><h3>Daily active viewers</h3><span>Unique viewers by playback day</span></div><Users size={19} /></div>
+          {data.daily.length ? <AudienceTrendChart rows={dailySeries} /> : <Empty text="Daily audience activity will appear as viewers watch." />}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AUDIENCE MIX</p><h3>Device distribution</h3><span>Share of active viewers · 30 days</span></div><Activity size={19} /></div>
+          {data.devices.length ? <div className="device-chart">
+            <div className="device-donut" style={{ background: `conic-gradient(${deviceGradient})` }}>
+              <div><strong>{deviceTotal.toLocaleString()}</strong><span>viewers</span></div>
+            </div>
+            <div className="device-legend">{data.devices.map((row, index) => <div className="device-legend-row" key={row.device}>
+              <i style={{ background: deviceColors[index % deviceColors.length] }} />
+              <span>{row.device}</span>
+              <strong>{Number(row.viewers).toLocaleString()}</strong>
+              <small>{deviceTotal ? (Number(row.viewers) / deviceTotal * 100).toFixed(0) : 0}%</small>
+            </div>)}</div>
+          </div> : <Empty text="Device mix will appear as viewers watch." />}
+        </section>
+      </div>
+      <div className="analytics-grid">
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">CONTENT PERFORMANCE</p><h3>Most watched programmes</h3><span>Ranked by watch time · 30 days</span></div><Film size={19} /></div>
+          {data.programmes.length ? <div className="analytics-rank-list">{data.programmes.map((row, index) => <div className="analytics-rank-row" key={row.id}>
+            <span className="analytics-rank-number">{String(index + 1).padStart(2, '0')}</span>
+            <div className="analytics-rank-content"><div className="analytics-rank-title"><strong>{row.title}</strong><span>{duration(Number(row.watchSeconds))} · {Number(row.viewers).toLocaleString()} viewers</span></div>
+              <div className="analytics-track"><i style={{ width: `${Math.max(2, Number(row.watchSeconds) / maxProgrammeWatch * 100)}%` }} /></div>
+              <div className="analytics-programme-rates"><span>Completion <b>{Number(row.completionRate).toFixed(1)}%</b></span><span>Drop-off <b>{Number(row.dropoffPercent).toFixed(1)}%</b></span></div>
+            </div>
+          </div>)}</div> : <Empty text="Programme analytics will appear as viewers watch." />}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">REACH</p><h3>Where viewers watch</h3><span>Top countries · 30 days</span></div><Activity size={19} /></div>
+          {data.geography.length ? <div className="analytics-country-list">{data.geography.slice(0, 8).map(row => <div className="analytics-country" key={row.country}>
+            <div><strong>{row.country}</strong><span>{Number(row.sessions).toLocaleString()} sessions</span><b>{Number(row.viewers).toLocaleString()}</b></div>
+            <div className="analytics-track"><i className="analytics-track-warm" style={{ width: `${Math.max(2, Number(row.viewers) / maxCountryViewers * 100)}%` }} /></div>
+          </div>)}</div> : <Empty text="Geography is unavailable until a trusted proxy supplies country codes." />}
+        </section>
+      </div>
+      <div className="analytics-grid">
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">REVENUE MIX</p><h3>Revenue sources</h3><span>Recorded and estimated revenue · 30 days</span></div><CircleDollarSign size={19} /></div>
+          <div className="revenue-total"><strong>{money(summary.totalRevenue)}</strong><span>Total revenue</span></div>
+          <div className="revenue-stack"><i style={{ width: `${subscriptionShare}%` }} /><i style={{ width: `${advertisingShare}%` }} /></div>
+          <div className="revenue-legend">
+            <div><i /><span>Subscriptions</span><strong>{money(summary.subscriptionRevenue)}</strong><small>{subscriptionShare.toFixed(0)}%</small></div>
+            <div><i /><span>Advertising estimate</span><strong>{money(summary.advertisingRevenue)}</strong><small>{advertisingShare.toFixed(0)}%</small></div>
+          </div>
+          <div className="revenue-foot"><span>Revenue per active viewer</span><strong>{money(summary.revenuePerViewer)}</strong></div>
+        </section>
+        <section className="panel analytics-panel analytics-ad-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AD PERFORMANCE</p><h3>Campaign delivery</h3><span>Impressions, completion and click-through</span></div><Megaphone size={19} /></div>
+          {data.advertising.length ? <div className="analytics-ad-list">{data.advertising.slice(0, 6).map(row => <div className="analytics-ad-row" key={row.id}>
+            <div className="analytics-ad-title"><strong>{row.campaignName}</strong><span>{Number(row.impressions).toLocaleString()} impressions · {Number(row.clicks).toLocaleString()} clicks</span><b>{money(row.revenue)}</b></div>
+            <div className="analytics-ad-metrics"><span>Completion <strong>{Number(row.completionRate).toFixed(1)}%</strong></span><span>CTR <strong>{Number(row.clickThroughRate).toFixed(2)}%</strong></span></div>
+            <div className="analytics-track analytics-ad-track"><i style={{ width: `${Math.min(100, Math.max(0, Number(row.completionRate)))}%` }} /><b style={{ left: `${Math.min(100, Math.max(0, Number(row.clickThroughRate)))}%` }} /></div>
+          </div>)}</div> : <Empty text="Ad performance will appear after impressions are served." />}
+        </section>
+      </div>
+      <section className="panel table-panel">
+        <div className="panel-heading"><div><p className="section-kicker">RETENTION · 30 DAYS</p><h3>Cancellations and payment stops</h3></div><CircleDollarSign size={20} /></div>
+        <p className="muted">Failed one-time checkouts and expired subscription terms are listed separately from user/admin cancellations.</p>
+        <table><thead><tr><th>Viewer</th><th>Plan</th><th>Outcome</th><th>Date</th></tr></thead><tbody>
+          {data.churn.map(row => <tr key={`${row.userId}-${row.reason}-${row.occurredAt}`}><td><strong>{row.name}</strong><small className="table-sub">{row.email}</small></td><td>{row.planCode}</td><td>{row.reason.replaceAll('_', ' ')}</td><td>{formatDateTime(row.occurredAt)}</td></tr>)}
+        </tbody></table>
+        {!data.churn.length && <Empty text="No recent cancellations, term expirations or failed payments." />}
+      </section>
+    </>
+  );
+}
+
+function AudienceTrendChart({ rows }: { rows: Array<{ day: string; viewers: number }> }) {
+  const width = 720;
+  const height = 245;
+  const padding = { top: 14, right: 14, bottom: 30, left: 42 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const max = Math.max(4, ...rows.map(row => row.viewers));
+  const points = rows.map((row, index) => ({
+    ...row,
+    x: padding.left + index / Math.max(1, rows.length - 1) * plotWidth,
+    y: padding.top + plotHeight - row.viewers / max * plotHeight,
+  }));
+  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const area = `${line} L ${padding.left + plotWidth} ${padding.top + plotHeight} L ${padding.left} ${padding.top + plotHeight} Z`;
+  const labels = [0, Math.floor((rows.length - 1) / 2), rows.length - 1]
+    .filter((index, position, list) => list.indexOf(index) === position)
+    .map(index => ({ index, label: new Date(`${rows[index].day}T00:00:00Z`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', timeZone: 'UTC' }) }));
+
+  return <div className="audience-trend">
+    <div className="audience-trend-summary"><strong>{Math.max(0, ...rows.map(row => row.viewers)).toLocaleString()}</strong><span>peak daily viewers</span></div>
+    <svg className="audience-trend-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily active viewers over the last 30 days">
+      <defs><linearGradient id="audienceTrendFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#287b68" stopOpacity=".24" /><stop offset="100%" stopColor="#287b68" stopOpacity="0" /></linearGradient></defs>
+      {[0, 0.5, 1].map(fraction => {
+        const y = padding.top + plotHeight * fraction;
+        return <g key={fraction}>
+          <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e8ece8" strokeDasharray="3 5" />
+          <text x={padding.left - 9} y={y + 4} textAnchor="end" className="audience-axis-label">{Math.round(max * (1 - fraction))}</text>
+        </g>;
+      })}
+      <path d={area} fill="url(#audienceTrendFill)" />
+      <path d={line} fill="none" stroke="#287b68" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      {points.filter((_, index) => index % 5 === 0 || index === points.length - 1).map(point =>
+        <circle key={point.day} cx={point.x} cy={point.y} r="3.5" fill="#fff" stroke="#287b68" strokeWidth="2" />,
+      )}
+    </svg>
+    <div className="audience-trend-dates">{labels.map(({ index, label }) => <span key={index} style={{ left: `${points[index].x / width * 100}%` }}>{label}</span>)}</div>
+    <div className="audience-chart-legend"><i /> Daily active viewers <span>·</span> {rows.length} days</div>
+  </div>;
 }
 
 function Overview({ overview }: { overview: any }) {
@@ -398,6 +596,7 @@ function ContentReview({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [posterFile, setPosterFile] = useState<File | null>(null);
+  const [posterHorizontalFile, setPosterHorizontalFile] = useState<File | null>(null);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [form, setForm] = useState({
     title: '',
@@ -459,10 +658,11 @@ function ContentReview({
     setSaving(true);
     setFormError('');
     try {
-      if (!posterFile || !mediaFile)
-        throw new Error('Choose both a poster image and an MP4 media file.');
-      const [posterKey, mediaKey] = await Promise.all([
+      if (!posterFile || !posterHorizontalFile || !mediaFile)
+        throw new Error('Choose vertical and horizontal poster images and an MP4 media file.');
+      const [posterKey, posterHorizontalKey, mediaKey] = await Promise.all([
         api.uploadMediaFile('poster', posterFile),
+        api.uploadMediaFile('poster', posterHorizontalFile),
         api.uploadMediaFile('media', mediaFile),
       ]);
       await api.createContent({
@@ -471,6 +671,7 @@ function ContentReview({
         latitude: form.latitude ? Number(form.latitude) : undefined,
         longitude: form.longitude ? Number(form.longitude) : undefined,
         posterKey,
+        posterHorizontalKey,
         mediaKey,
       });
       action(
@@ -480,6 +681,7 @@ function ContentReview({
       setRows(await api.content(filter));
       setShowForm(false);
       setPosterFile(null);
+      setPosterHorizontalFile(null);
       setMediaFile(null);
       setForm({
         title: '',
@@ -531,7 +733,7 @@ function ContentReview({
               />
             </label>
             <label>
-              Poster image
+              Vertical poster
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -554,8 +756,36 @@ function ContentReview({
                 }}
               />
               <small>
-                JPEG, PNG, or WebP. Maximum 10 MB.
+                Portrait image; JPEG, PNG, or WebP. Maximum 10 MB.
                 {posterFile ? ` Selected: ${posterFile.name}` : ''}
+              </small>
+            </label>
+            <label>
+              Horizontal poster
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                required
+                onChange={event => {
+                  try {
+                    setPosterHorizontalFile(
+                      validateFile(event.target.files?.[0], 'poster'),
+                    );
+                    setFormError('');
+                  } catch (error) {
+                    setPosterHorizontalFile(null);
+                    setFormError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Invalid horizontal poster.',
+                    );
+                    event.target.value = '';
+                  }
+                }}
+              />
+              <small>
+                Landscape image; JPEG, PNG, or WebP. Maximum 10 MB.
+                {posterHorizontalFile ? ` Selected: ${posterHorizontalFile.name}` : ''}
               </small>
             </label>
             <label>

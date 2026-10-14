@@ -17,6 +17,10 @@ export interface DramaItem {
   rating: string;
   badge: 'VIP' | 'FREE';
   posterUrl?: string;
+  posterHorizontalUrl?: string;
+  contentType: 'MOVIE' | 'SERIES';
+  createdAt: string;
+  trendingViews: number;
   progress?: number;
   timeLeft?: string;
   tag?: string;

@@ -38,8 +38,8 @@ export async function deleteContentPermanently(id: string, creatorId?: string, a
   let mediaReferences: string[] = [];
   try {
     await client.query('BEGIN');
-    const contentResult = await client.query<{ created_by: string | null; poster_url: string }>(
-      'SELECT created_by, poster_url FROM content WHERE id = $1 FOR UPDATE',
+    const contentResult = await client.query<{ created_by: string | null; poster_url: string; poster_horizontal_url: string | null }>(
+      'SELECT created_by, poster_url, poster_horizontal_url FROM content WHERE id = $1 FOR UPDATE',
       [id],
     );
     const content = contentResult.rows[0];
@@ -48,7 +48,7 @@ export async function deleteContentPermanently(id: string, creatorId?: string, a
       'SELECT hls_manifest_url FROM episodes WHERE content_id = $1',
       [id],
     );
-    mediaReferences = [content.poster_url, ...episodeResult.rows.map(episode => episode.hls_manifest_url)];
+    mediaReferences = [content.poster_url, content.poster_horizontal_url, ...episodeResult.rows.map(episode => episode.hls_manifest_url)].filter((reference): reference is string => Boolean(reference));
     await client.query('DELETE FROM content WHERE id = $1', [id]);
     if (adminId) {
       await client.query(

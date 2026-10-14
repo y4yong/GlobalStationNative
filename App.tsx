@@ -16,6 +16,8 @@ import {
   Platform,
   Alert,
   Linking,
+  Share,
+  Switch,
   Image,
   Modal,
 } from 'react-native';
@@ -24,7 +26,7 @@ import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { formatDate } from './src/core/formatDate';
 import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
@@ -51,7 +53,7 @@ const TextInput = ({ style, ...props }: TextInputProps) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
-  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Checkout' | 'Support' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
+  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -263,10 +265,10 @@ export default function App() {
         />
       ) : currentScreen === 'Campaign' ? (
         <CampaignScreen onBack={() => setCurrentScreen('Tabs')} />
-      ) : currentScreen === 'Checkout' ? (
-        <CheckoutScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Support' ? (
         <SupportScreen onBack={() => setCurrentScreen('Tabs')} />
+      ) : currentScreen === 'Engagement' ? (
+        <EngagementScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : (
         /* SCREEN 1, 4, 5, 6: TAB VIEWS */
         <View style={{ flex: 1 }}>
@@ -279,7 +281,7 @@ export default function App() {
             onAddEpisode={submission => { setSelectedCreatorSubmission(submission); setCurrentScreen('AddCreatorEpisode'); }}
           />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
-          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
+          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
         </View>
       )}
 
@@ -311,6 +313,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -319,7 +322,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
     setError('');
     try {
       const profile = registering
-        ? await registerViewer(name, email, password)
+        ? await registerViewer(name, email, password, referralCode.trim() || undefined)
         : await loginViewer(email, password);
       onAuthenticated(profile);
     } catch (requestError) {
@@ -338,6 +341,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
         {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
         <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
+        {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
         {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
         {!!error && <Text style={{ color: '#fca5a5', marginTop: 14 }}>{error}</Text>}
         <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={submit}>
@@ -367,15 +371,33 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
 function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
   const normalizedFilter = filter.trim().toLowerCase();
-  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [drama.category, drama.genre]).filter(Boolean))).sort(), ...(dramas.some((drama) => drama.badge === 'VIP') ? ['VIP'] : [])];
+  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [drama.category, drama.genre]).filter(Boolean))).sort()];
   const visibleDramas = filter === 'All'
     ? dramas
     : dramas.filter((d) => {
         const categoryMatch = d.category?.toLowerCase().includes(normalizedFilter) || d.genre?.toLowerCase().includes(normalizedFilter);
-        return filter === 'VIP' ? d.badge === 'VIP' : categoryMatch;
+        return categoryMatch;
       });
   const continueWatching = visibleDramas.filter((d) => d.progress);
-  const titleDramas = visibleDramas.filter((d) => !d.progress && (filter !== 'All' || d.id !== dramas[0]?.id));
+  const homeDramas = visibleDramas.filter((drama) => !drama.progress && (filter !== 'All' || drama.id !== dramas[0]?.id));
+  const trendingDramas = [...homeDramas].sort((a, b) => b.trendingViews - a.trendingViews).slice(0, 10);
+  const originalSeries = homeDramas.filter((drama) => drama.contentType === 'SERIES').slice(0, 10);
+  const newReleases = [...homeDramas].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 10);
+  const renderRail = (title: string, items: DramaItem[]) => items.length > 0 && <>
+    <View style={styles.sectionTitleRow}>
+      <Text style={styles.sectionHeaderTitle}>{title}</Text>
+    </View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
+      {items.map((drama) => (
+        <TouchableOpacity key={drama.id} style={styles.popularCard} onPress={() => onSelect(drama)}>
+          <View style={styles.popularPosterFrame}>
+            <PosterImage uri={drama.posterUrl} title={drama.title} style={styles.popularPosterPlaceholder} />
+          </View>
+          <Text numberOfLines={2} style={styles.popularCardTitle}>{drama.title}</Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </>;
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
@@ -410,7 +432,7 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
 
       {/* Hero Banner */}
       {filter === 'All' && dramas[0] && <View style={styles.heroCard}>
-        <PosterImage uri={dramas[0].posterUrl} title={dramas[0].title} style={styles.heroPosterImage} />
+        <PosterImage uri={dramas[0].posterHorizontalUrl ?? dramas[0].posterUrl} title={dramas[0].title} style={styles.heroPosterImage} />
         <View style={styles.heroGradient}>
           <Text style={styles.heroDramaTitle}>{dramas[0].title}</Text>
           <Text style={styles.heroSub}>{dramas[0].genre} • {dramas[0].rating}</Text>
@@ -441,21 +463,9 @@ function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSear
         </ScrollView>
       </>}
 
-      {titleDramas.length > 0 && <>
-        <View style={styles.sectionTitleRow}>
-          <Text style={styles.sectionHeaderTitle}>Titles</Text>
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
-          {titleDramas.map((d) => (
-            <TouchableOpacity key={d.id} style={styles.popularCard} onPress={() => onSelect(d)}>
-              <View style={styles.popularPosterFrame}>
-                <PosterImage uri={d.posterUrl} title={d.title} style={styles.popularPosterPlaceholder} />
-              </View>
-              <Text numberOfLines={2} style={styles.popularCardTitle}>{d.title}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </>}
+      {renderRail('Trending Now', trendingDramas)}
+      {renderRail('Original Series', originalSeries)}
+      {renderRail('New Releases', newReleases)}
       {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
@@ -468,7 +478,6 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedType, setSelectedType] = useState<'All' | 'MOVIE' | 'SERIES'>('All');
-  const [selectedAccess, setSelectedAccess] = useState<'All' | 'FREE' | 'VIP'>('All');
   const [results, setResults] = useState<DramaItem[]>(dramas);
   const [searchError, setSearchError] = useState('');
   const categories = Array.from(new Set([...CONTENT_CATEGORIES, ...dramas.map(drama => drama.category).filter(Boolean)])).sort();
@@ -508,16 +517,15 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
     const matchesGenre = selectedGenre === 'All' || d.genre.trim().toLowerCase() === selectedGenre.toLowerCase();
     const matchesCategory = selectedCategory === 'All' || d.category.trim().toLowerCase() === selectedCategory.toLowerCase();
     const matchesType = selectedType === 'All' || d.contentType === selectedType;
-    const matchesAccess = selectedAccess === 'All' || d.badge === selectedAccess;
-    return matchesGenre && matchesCategory && matchesType && matchesAccess;
+    return matchesGenre && matchesCategory && matchesType;
   });
-  const hasActiveFilters = selectedGenre !== 'All' || selectedCategory !== 'All' || selectedType !== 'All' || selectedAccess !== 'All';
-  const activeFilterCount = [selectedGenre, selectedCategory, selectedType, selectedAccess].filter(value => value !== 'All').length;
+  const hasActiveFilters = selectedGenre !== 'All' || selectedCategory !== 'All' || selectedType !== 'All';
+  const activeFilterCount = [selectedGenre, selectedCategory, selectedType].filter(value => value !== 'All').length;
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
       <Text style={styles.screenMainTitle}>Search</Text>
-      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, type, or access.</Text>
+      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, or type.</Text>
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
@@ -542,16 +550,15 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
               <Text style={styles.searchFilterTitle}>Filters</Text>
               {activeFilterCount > 0 && <View style={styles.searchFilterCount}><Text style={styles.searchFilterCountText}>{activeFilterCount}</Text></View>}
             </View>
-            <Text style={styles.searchFilterToggleText}>{filtersExpanded ? 'Hide  ˄' : 'Show  ˅'}</Text>
+            <Text style={styles.searchFilterToggleText}>{filtersExpanded ? 'Hide' : 'Show'}</Text>
           </TouchableOpacity>
           {hasActiveFilters && <TouchableOpacity accessibilityRole="button" onPress={() => {
             setSelectedGenre('All');
             setSelectedCategory('All');
             setSelectedType('All');
-            setSelectedAccess('All');
           }}><Text style={styles.searchFilterReset}>Reset</Text></TouchableOpacity>}
         </View>
-        {filtersExpanded && <>
+        {filtersExpanded && <View style={styles.searchFilterOptions}>
         <Text style={styles.searchFilterLabel}>GENRE</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.searchFilterRow}>
           {['All', ...CONTENT_GENRES].map(genre => (
@@ -568,28 +575,14 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
             </TouchableOpacity>
           ))}
         </ScrollView>
-        <View style={styles.searchFilterPair}>
-          <View style={styles.searchFilterGroup}>
-            <Text style={styles.searchFilterLabel}>TYPE</Text>
-            <View style={styles.searchFilterInline}>
-              {(['All', 'MOVIE', 'SERIES'] as const).map(type => (
-                <TouchableOpacity key={type} accessibilityRole="button" accessibilityState={{ selected: selectedType === type }} style={[styles.searchFilterChip, styles.searchFilterInlineChip, selectedType === type && styles.searchFilterChipActive]} onPress={() => setSelectedType(type)}>
-                  <Text style={[styles.searchFilterChipText, selectedType === type && styles.searchFilterChipTextActive]}>{type === 'MOVIE' ? 'Movie' : type === 'SERIES' ? 'Series' : 'Any'}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-          <View style={styles.searchFilterGroup}>
-            <Text style={styles.searchFilterLabel}>ACCESS</Text>
-            <View style={styles.searchFilterInline}>
-              {(['All', 'FREE', 'VIP'] as const).map(access => (
-                <TouchableOpacity key={access} accessibilityRole="button" accessibilityState={{ selected: selectedAccess === access }} style={[styles.searchFilterChip, styles.searchFilterInlineChip, selectedAccess === access && styles.searchFilterChipActive]} onPress={() => setSelectedAccess(access)}>
-                  <Text style={[styles.searchFilterChipText, selectedAccess === access && styles.searchFilterChipTextActive]}>{access === 'All' ? 'Any' : access}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </>}
+        <Text style={styles.searchFilterLabel}>TYPE</Text>
+        <View style={styles.searchFilterInline}>
+          {(['All', 'MOVIE', 'SERIES'] as const).map(type => (
+            <TouchableOpacity key={type} accessibilityRole="button" accessibilityState={{ selected: selectedType === type }} style={[styles.searchFilterChip, styles.searchFilterInlineChip, selectedType === type && styles.searchFilterChipActive]} onPress={() => setSelectedType(type)}>
+              <Text style={[styles.searchFilterChipText, selectedType === type && styles.searchFilterChipTextActive]}>{type === 'MOVIE' ? 'Movie' : type === 'SERIES' ? 'Series' : 'Any'}</Text>
+            </TouchableOpacity>
+          ))}
+        </View></View>}
       </View>
 
       <View style={styles.searchResultsHeader}>
@@ -805,7 +798,7 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView({ profile, onSupport, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
+function ProfileTabView({ profile, onSupport, onEngagement, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onEngagement: () => void; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
   const roles = Array.from(new Set(profile.roles?.length ? profile.roles : [profile.role]));
   const missingRoles = profile.role === 'ADMIN' ? [] : (['CREATOR', 'ADVERTISER'] as const).filter(role => !roles.includes(role));
   const [message, setMessage] = useState('');
@@ -843,7 +836,7 @@ function ProfileTabView({ profile, onSupport, onRefreshProfile, onUpgradeRole, o
     try {
       const checkout = await createVipCheckout(plan);
       await Linking.openURL(checkout.paymentUrl);
-      setMessage('Complete payment in Billplz, return here, then refresh membership status.');
+      setMessage('Complete payment in Stripe Checkout, return here, then refresh membership status.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to start checkout.');
     } finally {
@@ -934,6 +927,13 @@ function ProfileTabView({ profile, onSupport, onRefreshProfile, onUpgradeRole, o
       {!!message && <Text style={styles.profileNotice}>{message}</Text>}
 
       <View style={styles.profileActions}>
+        <TouchableOpacity accessibilityRole="button" style={styles.profileActionRow} onPress={onEngagement}>
+          <View>
+            <Text style={styles.profileActionTitle}>Notifications & referrals</Text>
+            <Text style={styles.engagementActionSub}>Inbox, preferences and invite code</Text>
+          </View>
+          <Text style={styles.profileRoleArrow}>›</Text>
+        </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" style={styles.profileActionRow} onPress={onSupport}>
           <Text style={styles.profileActionTitle}>Contact support</Text>
           <Text style={styles.profileRoleArrow}>›</Text>
@@ -960,6 +960,208 @@ function ProfileTabView({ profile, onSupport, onRefreshProfile, onUpgradeRole, o
   );
 }
 
+function EngagementScreen({ onBack }: { onBack: () => void }) {
+  const [section, setSection] = useState<'inbox' | 'referrals' | 'preferences'>('inbox');
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [referral, setReferral] = useState<ReferralOverview | null>(null);
+  const [preferences, setPreferences] = useState<NotificationPreferences>({
+    in_app: true,
+    push: false,
+    email: false,
+    sms: false,
+    whatsapp: false,
+  });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [savingPreference, setSavingPreference] = useState<keyof NotificationPreferences | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    const results = await Promise.allSettled([
+      getNotifications(),
+      getReferralOverview(),
+      getNotificationPreferences(),
+    ]);
+    const failures: string[] = [];
+    if (results[0].status === 'fulfilled') setNotifications(results[0].value);
+    else failures.push(results[0].reason instanceof Error ? results[0].reason.message : 'Unable to load notifications.');
+    if (results[1].status === 'fulfilled') setReferral(results[1].value);
+    else failures.push(results[1].reason instanceof Error ? results[1].reason.message : 'Unable to load referral details.');
+    if (results[2].status === 'fulfilled') setPreferences(results[2].value);
+    else failures.push(results[2].reason instanceof Error ? results[2].reason.message : 'Unable to load notification preferences.');
+    if (failures.length) setError(failures.join(' '));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function readNotification(notification: InAppNotification) {
+    if (notification.readAt) return;
+    setBusy(true);
+    setError('');
+    try {
+      await markNotificationRead(notification.id);
+      const readAt = new Date().toISOString();
+      setNotifications(current => current.map(item => item.id === notification.id
+        ? { ...item, status: 'READ', readAt }
+        : item));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to mark this notification as read.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function readAllNotifications() {
+    setBusy(true);
+    setError('');
+    try {
+      await markAllNotificationsRead();
+      const readAt = new Date().toISOString();
+      setNotifications(current => current.map(item => item.readAt ? item : { ...item, status: 'READ', readAt }));
+      setNotice('All notifications marked as read.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to update notifications.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changePreference(key: keyof NotificationPreferences, enabled: boolean) {
+    setSavingPreference(key);
+    setError('');
+    setNotice('');
+    try {
+      const updated = await updateNotificationPreferences({ [key]: enabled });
+      setPreferences(updated);
+      setNotice('Notification preference saved.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to save this preference.');
+    } finally {
+      setSavingPreference(null);
+    }
+  }
+
+  async function shareReferralCode() {
+    if (!referral) return;
+    try {
+      await Share.share({
+        message: `Join me on Global Station. Use my referral code ${referral.code} when you create your account.`,
+      });
+    } catch (shareError) {
+      setError(shareError instanceof Error ? shareError.message : 'Unable to share your referral code.');
+    }
+  }
+
+  const unreadCount = notifications.filter(item => !item.readAt).length;
+  const referralCount = referral?.referrals.reduce((sum, item) => sum + item.count, 0) ?? 0;
+
+  return <View style={styles.flowScreen}>
+    <FlowHeader title="Engagement" onBack={onBack} />
+    <ScrollView contentContainerStyle={styles.engagementPage}>
+      <Text style={styles.screenMainTitle}>Stay connected</Text>
+      <Text style={styles.screenSubTitle}>Notifications, invites and your reward history.</Text>
+
+      <View style={styles.engagementTabs}>
+        {([
+          ['inbox', `Inbox${unreadCount ? ` · ${unreadCount}` : ''}`],
+          ['referrals', 'Refer a friend'],
+          ['preferences', 'Preferences'],
+        ] as const).map(([key, label]) => (
+          <TouchableOpacity key={key} accessibilityRole="button" accessibilityState={{ selected: section === key }}
+            style={[styles.engagementTab, section === key && styles.engagementTabActive]}
+            onPress={() => { setSection(key); setError(''); setNotice(''); }}>
+            <Text style={[styles.engagementTabText, section === key && styles.engagementTabTextActive]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {!!error && <Text accessibilityRole="alert" style={styles.engagementError}>{error}</Text>}
+      {!!notice && <Text style={styles.engagementNotice}>{notice}</Text>}
+      {loading && <View style={styles.engagementLoading}><ActivityIndicator color={COLORS.cyan} /><Text style={styles.screenSubTitle}>Loading engagement details…</Text></View>}
+
+      {!loading && section === 'inbox' && <>
+        <View style={styles.engagementSectionHeading}>
+          <View><Text style={styles.profileSectionTitle}>In-app notifications</Text><Text style={styles.screenSubTitle}>{notifications.length} recent</Text></View>
+          <TouchableOpacity accessibilityRole="button" style={styles.secondaryFlowBtn} disabled={busy || unreadCount === 0} onPress={readAllNotifications}>
+            <Text style={styles.secondaryFlowText}>{busy ? 'Updating…' : 'Mark all read'}</Text>
+          </TouchableOpacity>
+        </View>
+        {notifications.length === 0
+          ? <View style={styles.engagementEmpty}><Text style={styles.engagementEmptyTitle}>You’re all caught up</Text><Text style={styles.screenSubTitle}>New account updates and campaigns will show up here.</Text></View>
+          : notifications.map(notification => <TouchableOpacity key={notification.id} accessibilityRole="button"
+            accessibilityLabel={`${notification.title}${notification.readAt ? ', read' : ', unread'}`}
+            disabled={busy || !!notification.readAt} onPress={() => readNotification(notification)}
+            style={[styles.notificationCard, !notification.readAt && styles.notificationCardUnread]}>
+            <View style={styles.notificationHeading}>
+              <Text style={styles.notificationTitle}>{notification.title}</Text>
+              {!notification.readAt && <View style={styles.notificationUnreadDot} />}
+            </View>
+            <Text style={styles.notificationBody}>{notification.body}</Text>
+            <Text style={styles.notificationDate}>{formatDate(notification.createdAt)}{!notification.readAt ? ' · Tap to mark read' : ' · Read'}</Text>
+          </TouchableOpacity>)}
+      </>}
+
+      {!loading && section === 'referrals' && <>
+        <View style={styles.referralInviteCard}>
+          <Text style={styles.referralInviteEyebrow}>YOUR INVITE CODE</Text>
+          <Text selectable style={styles.referralInviteCode}>{referral?.code ?? 'Unavailable'}</Text>
+          <Text style={styles.screenSubTitle}>Share your code with a friend. We’ll record the referral when they use it to create an account.</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.cyanPrimaryBtn} disabled={!referral} onPress={shareReferralCode}>
+            <Text style={styles.cyanPrimaryBtnText}>Share referral code</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.referralStatsRow}>
+          <View style={styles.referralStatCard}><Text style={styles.engagementStatValue}>{referralCount}</Text><Text style={styles.engagementStatLabel}>Sign-ups attributed</Text></View>
+          <View style={styles.referralStatCard}><Text style={styles.engagementStatValue}>{referral?.rewards.length ?? 0}</Text><Text style={styles.engagementStatLabel}>Reward records</Text></View>
+        </View>
+        <Text style={[styles.profileSectionTitle, styles.engagementRewardsHeading]}>Referral activity</Text>
+        {(referral?.referrals ?? []).length === 0
+          ? <Text style={styles.engagementEmptyText}>Your referral activity will appear here.</Text>
+          : referral?.referrals.map(item => <View key={item.status} style={styles.referralActivityRow}>
+            <Text style={styles.notificationTitle}>{item.status.replace('_', ' ')}</Text><Text style={styles.engagementStatValue}>{item.count}</Text>
+          </View>)}
+        <Text style={[styles.profileSectionTitle, styles.engagementRewardsHeading]}>Rewards</Text>
+        {(referral?.rewards ?? []).length === 0
+          ? <Text style={styles.engagementEmptyText}>No rewards yet. Reward availability depends on future campaign terms.</Text>
+          : referral?.rewards.map(reward => <View key={reward.id} style={styles.notificationCard}>
+            <View style={styles.notificationHeading}><Text style={styles.notificationTitle}>{reward.rewardType.replaceAll('_', ' ')}</Text><Text style={styles.rewardStatus}>{reward.status}</Text></View>
+            <Text style={styles.notificationBody}>{reward.amount}{reward.currency ? ` ${reward.currency}` : ''} · Created {formatDate(reward.createdAt)}</Text>
+          </View>)}
+        <Text style={styles.engagementFootnote}>Referral tracking is active. Discounts or subscription rewards are not automatically applied yet.</Text>
+      </>}
+
+      {!loading && section === 'preferences' && <>
+        <Text style={styles.profileSectionTitle}>Choose your channels</Text>
+        <Text style={styles.screenSubTitle}>Preferences are saved to your account. External delivery channels are not connected yet.</Text>
+        {([
+          ['in_app', 'In-app notifications', 'Updates in your Global Station inbox.'],
+          ['push', 'Push notifications', 'Available after push service and device permissions are configured.'],
+          ['email', 'Email', 'Email delivery provider is not connected yet.'],
+          ['sms', 'SMS', 'SMS provider is not connected yet.'],
+          ['whatsapp', 'WhatsApp', 'WhatsApp provider is not connected yet.'],
+        ] as const).map(([key, title, description]) => (
+          <View key={key} style={styles.preferenceRow}>
+            <View style={styles.preferenceCopy}><Text style={styles.notificationTitle}>{title}</Text><Text style={styles.preferenceDescription}>{description}</Text></View>
+            <Switch accessibilityLabel={`${title} preference`} value={preferences[key]} disabled={savingPreference !== null}
+              onValueChange={enabled => changePreference(key, enabled)}
+              trackColor={{ false: '#334155', true: COLORS.cyanDark }} thumbColor={preferences[key] ? COLORS.cyan : '#cbd5e1'} />
+          </View>
+        ))}
+      </>}
+
+      {!loading && <TouchableOpacity accessibilityRole="button" style={styles.engagementRefresh} disabled={busy} onPress={refresh}>
+        <Text style={styles.profileRefreshText}>Refresh</Text>
+      </TouchableOpacity>}
+    </ScrollView>
+  </View>;
+}
+
 function FlowHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return <View style={styles.flowHeader}><TouchableOpacity onPress={onBack}><Text style={styles.backBtnText}>‹ Back</Text></TouchableOpacity><Text style={styles.flowHeaderTitle}>{title}</Text><View style={{ width: 48 }} /></View>;
 }
@@ -979,7 +1181,34 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
   const onCompleteRef = useRef(onComplete);
   const activeRef = useRef(true);
   const requestIdRef = useRef(0);
+  const lastReportedAdSecond = useRef(-1);
+  const completionReported = useRef(false);
   onCompleteRef.current = onComplete;
+
+  function reportAdProgress(position: number, duration: number, completed = false) {
+    if (!ad || duration <= 0 || (completed && completionReported.current)) return;
+    const wholeSecond = Math.floor(position);
+    if (!completed && wholeSecond - lastReportedAdSecond.current < 5) return;
+    if (completed) completionReported.current = true;
+    const previousSecond = lastReportedAdSecond.current;
+    lastReportedAdSecond.current = wholeSecond;
+    recordAdProgress(ad.impressionId, wholeSecond, Math.floor(duration), completed).catch((requestError) => {
+      lastReportedAdSecond.current = previousSecond;
+      if (activeRef.current) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to record ad playback.');
+      }
+    });
+  }
+
+  async function openAdvertiserPage() {
+    if (!ad?.clickThroughUrl) return;
+    try {
+      await recordAdClick(ad.impressionId);
+      await Linking.openURL(ad.clickThroughUrl);
+    } catch {
+      Alert.alert('Unable to open link', 'The advertiser click could not be recorded or the page could not be opened.');
+    }
+  }
 
   const loadAd = useCallback(() => {
     const requestId = ++requestIdRef.current;
@@ -988,7 +1217,11 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
     getAdPayload().then((payload) => {
       if (!activeRef.current || requestId !== requestIdRef.current) return;
       if (!payload) onCompleteRef.current();
-      else setAd(payload);
+      else {
+        lastReportedAdSecond.current = -1;
+        completionReported.current = false;
+        setAd(payload);
+      }
     }).catch((requestError) => {
       if (activeRef.current && requestId === requestIdRef.current) {
         setError(requestError instanceof Error ? requestError.message : 'Unable to load an ad.');
@@ -1047,9 +1280,9 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
       viewType={ViewType.TEXTURE}
       pointerEvents="none"
       style={StyleSheet.absoluteFill}
-      onLoad={({ duration }) => setAdDuration(duration)}
-      onProgress={({ currentTime }) => setAdCurrentTime(currentTime)}
-      onEnd={() => onCompleteRef.current()}
+      onLoad={({ duration }) => { setAdDuration(duration); reportAdProgress(0, duration); }}
+      onProgress={({ currentTime }) => { setAdCurrentTime(currentTime); reportAdProgress(currentTime, adDuration); }}
+      onEnd={() => { reportAdProgress(adDuration, adDuration, true); onCompleteRef.current(); }}
       onError={() => setError('The ad video could not be played.')}
     />
     <View pointerEvents="box-none" style={styles.adPlayerOverlay}>
@@ -1075,7 +1308,7 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
             <Text style={styles.adTimeText}>Ad · {formatAdTime(adCurrentTime)} / {formatAdTime(adDuration)}</Text>
           </View>
           <View style={styles.adActionRow}>
-            {ad.clickThroughUrl && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Visit Page" style={styles.adVisitButton} onPress={() => Linking.openURL(ad.clickThroughUrl!).catch(() => Alert.alert('Unable to open link', 'The advertiser link could not be opened.'))}><Text style={styles.adVisitButtonText}>Visit Page</Text></TouchableOpacity>}
+            {ad.clickThroughUrl && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Visit Page" style={styles.adVisitButton} onPress={openAdvertiserPage}><Text style={styles.adVisitButtonText}>Visit Page</Text></TouchableOpacity>}
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={secondsUntilSkip > 0 ? `Skip ad in ${secondsUntilSkip} seconds` : 'Skip ad'} style={[styles.skipBtn, styles.adSkipButton]} disabled={secondsUntilSkip > 0} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>{secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Skip ad'}</Text></TouchableOpacity>
           </View>
         </View>
@@ -1118,6 +1351,41 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   </View>;
 }
 
+type CreatorVideoFile = { path: string; name: string; size: number };
+type CreatorPosterFile = CreatorVideoFile & { contentType: string };
+
+async function pickCreatorPoster(): Promise<CreatorPosterFile> {
+  const [picked] = await pick({ type: [types.images], mode: 'import' });
+  const name = picked.name?.trim() || decodeURIComponent(picked.uri.split('/').pop()?.split('?')[0] ?? 'poster');
+  const extension = name.toLowerCase().split('.').pop();
+  const extensionTypes: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+  const reportedType = picked.type?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : picked.type?.toLowerCase();
+  const contentType = reportedType && ['image/jpeg', 'image/png', 'image/webp'].includes(reportedType)
+    ? reportedType
+    : extensionTypes[extension ?? ''];
+  if (!contentType) throw new Error('Choose a JPEG, PNG, or WebP poster image.');
+  const [copy] = await keepLocalCopy({ files: [{ uri: picked.uri, fileName: name }], destination: 'cachesDirectory' });
+  if (copy.status !== 'success') throw new Error(copy.copyError || 'Unable to access the selected poster.');
+  const path = copy.localUri.replace(/^file:\/\//, '');
+  const file = await ReactNativeBlobUtil.fs.stat(path);
+  const size = picked.size && picked.size > 0 ? picked.size : Number(file.size);
+  if (!Number.isSafeInteger(size) || size < 1) throw new Error('The selected poster file is empty or unreadable.');
+  if (size > 10 * 1024 * 1024) throw new Error('Poster images must be 10 MB or smaller.');
+  return { path, name, size, contentType };
+}
+
+async function uploadCreatorPoster(poster: CreatorPosterFile, onProgress?: (progress: number) => void) {
+  const upload = await createCreatorPosterUpload(poster.contentType, poster.size);
+  const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl,
+    { 'Content-Type': upload.contentType, ...upload.requiredHeaders },
+    ReactNativeBlobUtil.wrap(poster.path))
+    .uploadProgress({ interval: 500 }, (written, total) => onProgress?.(Math.round(written / Math.max(1, total) * 100)));
+  if (result.info().status < 200 || result.info().status >= 300) {
+    throw new Error(`Poster upload failed (${result.info().status}).`);
+  }
+  return upload.objectKey;
+}
+
 function UploadScreen({ onBack }: { onBack: () => void }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -1129,7 +1397,8 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
   const [contentType, setContentType] = useState<'MOVIE' | 'SERIES'>('SERIES');
   const [isExclusiveVip, setIsExclusiveVip] = useState(false);
   const [video, setVideo] = useState<{ path: string; name: string; size: number } | null>(null);
-  const [poster, setPoster] = useState<{ path: string; name: string; size: number; contentType: string } | null>(null);
+  const [poster, setPoster] = useState<CreatorPosterFile | null>(null);
+  const [posterHorizontal, setPosterHorizontal] = useState<CreatorPosterFile | null>(null);
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1149,35 +1418,17 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  async function choosePoster() {
+  async function choosePoster(setPosterFile: (file: CreatorPosterFile) => void) {
     setNotice('');
     try {
-      const [picked] = await pick({ type: [types.images], mode: 'import' });
-      const name = picked.name?.trim() || decodeURIComponent(picked.uri.split('/').pop()?.split('?')[0] ?? 'poster');
-      const extension = name.toLowerCase().split('.').pop();
-      const extensionTypes: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
-      const reportedType = picked.type?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : picked.type?.toLowerCase();
-      const contentType = reportedType && ['image/jpeg', 'image/png', 'image/webp'].includes(reportedType)
-        ? reportedType
-        : extensionTypes[extension ?? ''];
-      if (!contentType) {
-        throw new Error('Choose a JPEG, PNG, or WebP poster image.');
-      }
-      const [copy] = await keepLocalCopy({ files: [{ uri: picked.uri, fileName: name }], destination: 'cachesDirectory' });
-      if (copy.status !== 'success') throw new Error(copy.copyError || 'Unable to access the selected poster.');
-      const path = copy.localUri.replace(/^file:\/\//, '');
-      const file = await ReactNativeBlobUtil.fs.stat(path);
-      const size = picked.size && picked.size > 0 ? picked.size : Number(file.size);
-      if (!Number.isSafeInteger(size) || size < 1) throw new Error('The selected poster file is empty or unreadable.');
-      if (size > 10 * 1024 * 1024) throw new Error('Poster images must be 10 MB or smaller.');
-      setPoster({ path, name, size, contentType });
+      setPosterFile(await pickCreatorPoster());
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Unable to select poster image.');
     }
   }
 
   async function submit() {
-    if (!video || !poster) { setNotice('Select both an MP4 video and a poster image first.'); return; }
+    if (!video || !poster || !posterHorizontal) { setNotice('Select an MP4 video and both vertical and horizontal posters first.'); return; }
     if (!title.trim() || !description.trim() || !genre || !category || (contentType === 'SERIES' && !episodeTitle.trim()) || !Number.isSafeInteger(Number(durationSeconds)) || Number(durationSeconds) <= 0) {
       setNotice('Complete all content details before submitting.');
       return;
@@ -1186,16 +1437,16 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     setNotice('');
     setProgress(0);
     try {
-      const posterUpload = await createCreatorPosterUpload(poster.contentType, poster.size);
-      const posterResult = await ReactNativeBlobUtil.fetch('PUT', posterUpload.uploadUrl, { 'Content-Type': posterUpload.contentType, ...posterUpload.requiredHeaders }, ReactNativeBlobUtil.wrap(poster.path))
-        .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(15, Math.round(written / Math.max(1, total) * 15))));
-      if (posterResult.info().status < 200 || posterResult.info().status >= 300) throw new Error(`Poster upload failed (${posterResult.info().status}).`);
+      const posterHorizontalKey = await uploadCreatorPoster(posterHorizontal,
+        amount => setProgress(Math.round(amount * 0.1)));
+      const posterKey = await uploadCreatorPoster(poster,
+        amount => setProgress(10 + Math.round(amount * 0.1)));
 
       const upload = await createCreatorUpload(video.size);
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
-        .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 15 + Math.round(written / Math.max(1, total) * 85))));
+        .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 20 + Math.round(written / Math.max(1, total) * 80))));
       if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
-      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey: posterUpload.objectKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: Number(durationSeconds), mediaKey: upload.objectKey, isExclusiveVip });
+      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: Number(durationSeconds), mediaKey: upload.objectKey, isExclusiveVip });
       Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
       onBack();
     } catch (error) {
@@ -1207,9 +1458,10 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
 
   return <View style={styles.flowScreen}><FlowHeader title="Upload content" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
     <Text style={styles.screenMainTitle}>Submit a video</Text>
-    <Text style={styles.screenSubTitle}>Submit an MP4 and poster image. Content is reviewed before it appears in the catalog.</Text>
+    <Text style={styles.screenSubTitle}>Submit an MP4 with vertical and horizontal posters. Content is reviewed before it appears in the catalog.</Text>
     <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={chooseVideo}><Text style={styles.secondaryFlowText}>{video ? `${video.name} • ${(video.size / 1048576).toFixed(1)} MB` : 'Choose MP4 video'}</Text></TouchableOpacity>
-    <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={choosePoster}><Text style={styles.secondaryFlowText}>{poster ? `${poster.name} • ${(poster.size / 1048576).toFixed(1)} MB` : 'Choose poster (JPEG, PNG, WebP; max 10 MB)'}</Text></TouchableOpacity>
+    <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPoster)}><Text style={styles.secondaryFlowText}>{poster ? `Vertical poster · ${poster.name} • ${(poster.size / 1048576).toFixed(1)} MB` : 'Choose vertical poster (portrait)'}</Text></TouchableOpacity>
+    <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPosterHorizontal)}><Text style={styles.secondaryFlowText}>{posterHorizontal ? `Horizontal poster · ${posterHorizontal.name} • ${(posterHorizontal.size / 1048576).toFixed(1)} MB` : 'Choose horizontal poster (landscape)'}</Text></TouchableOpacity>
     <View style={styles.heroBtnRow}>{(['SERIES', 'MOVIE'] as const).map((type) => <TouchableOpacity key={type} disabled={busy} style={[styles.chip, contentType === type && styles.chipActive]} onPress={() => setContentType(type)}><Text style={[styles.chipText, contentType === type && styles.chipTextActive]}>{type}</Text></TouchableOpacity>)}</View>
     <View style={styles.flowField}><Text style={styles.flowLabel}>Title</Text><TextInput value={title} onChangeText={setTitle} editable={!busy} maxLength={255} style={styles.flowInput} /></View>
     {contentType === 'SERIES' && <View style={styles.flowField}><Text style={styles.flowLabel}>First episode title</Text><TextInput value={episodeTitle} onChangeText={setEpisodeTitle} editable={!busy} maxLength={255} style={styles.flowInput} /></View>}
@@ -1220,14 +1472,11 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     <View style={styles.flowField}><Text style={styles.flowLabel}>Duration (seconds)</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} style={styles.flowInput} keyboardType="number-pad" /></View>
     <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isExclusiveVip }} style={styles.secondaryFlowBtn} disabled={busy} onPress={() => setIsExclusiveVip(!isExclusiveVip)}><Text style={styles.secondaryFlowText}>{isExclusiveVip ? '☑ VIP exclusive' : '☐ VIP exclusive'}</Text></TouchableOpacity>
     {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
-    {busy && <Text style={styles.screenSubTitle}>Uploading poster and video: {progress}%</Text>}
+    {busy && <Text style={styles.screenSubTitle}>Uploading posters and video: {progress}%</Text>}
     {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
     <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busy} onPress={submit}><Text style={styles.cyanPrimaryBtnText}>{busy ? 'Uploading...' : 'Upload and submit for review'}</Text></TouchableOpacity>
   </ScrollView></View>;
 }
-
-type CreatorVideoFile = { path: string; name: string; size: number };
-type CreatorPosterFile = CreatorVideoFile & { contentType: string };
 
 async function uploadCreatorVideoFile(video: CreatorVideoFile, onProgress: (progress: number) => void) {
   const upload = await createCreatorUpload(video.size);
@@ -1326,30 +1575,15 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
   const [rating, setRating] = useState(submission.rating);
   const [isExclusiveVip, setIsExclusiveVip] = useState(submission.isExclusiveVip);
   const [poster, setPoster] = useState<CreatorPosterFile | null>(null);
+  const [posterHorizontal, setPosterHorizontal] = useState<CreatorPosterFile | null>(null);
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function choosePoster() {
+  async function choosePoster(setPosterFile: (file: CreatorPosterFile) => void) {
     setNotice('');
     try {
-      const [picked] = await pick({ type: [types.images], mode: 'import' });
-      const name = picked.name?.trim() || decodeURIComponent(picked.uri.split('/').pop()?.split('?')[0] ?? 'poster');
-      const extension = name.toLowerCase().split('.').pop();
-      const extensionTypes: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
-      const reportedType = picked.type?.toLowerCase() === 'image/jpg' ? 'image/jpeg' : picked.type?.toLowerCase();
-      const contentType = reportedType && ['image/jpeg', 'image/png', 'image/webp'].includes(reportedType)
-        ? reportedType
-        : extensionTypes[extension ?? ''];
-      if (!contentType) throw new Error('Choose a JPEG, PNG, or WebP poster image.');
-      const [copy] = await keepLocalCopy({ files: [{ uri: picked.uri, fileName: name }], destination: 'cachesDirectory' });
-      if (copy.status !== 'success') throw new Error(copy.copyError || 'Unable to access the selected poster.');
-      const path = copy.localUri.replace(/^file:\/\//, '');
-      const file = await ReactNativeBlobUtil.fs.stat(path);
-      const size = picked.size && picked.size > 0 ? picked.size : Number(file.size);
-      if (!Number.isSafeInteger(size) || size < 1) throw new Error('The selected poster file is empty or unreadable.');
-      if (size > 10 * 1024 * 1024) throw new Error('Poster images must be 10 MB or smaller.');
-      setPoster({ path, name, size, contentType });
+      setPosterFile(await pickCreatorPoster());
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Unable to select poster image.');
     }
@@ -1365,12 +1599,13 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
     setProgress(0);
     try {
       let posterKey: string | undefined;
+      let posterHorizontalKey: string | undefined;
       if (poster) {
-        const upload = await createCreatorPosterUpload(poster.contentType, poster.size);
-        const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType, ...upload.requiredHeaders }, ReactNativeBlobUtil.wrap(poster.path))
-          .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(40, Math.round(written / Math.max(1, total) * 40))));
-        if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Poster upload failed (${result.info().status}).`);
-        posterKey = upload.objectKey;
+        posterKey = await uploadCreatorPoster(poster, amount => setProgress(Math.round(amount * (posterHorizontal ? 0.2 : 0.4))));
+      }
+      if (posterHorizontal) {
+        posterHorizontalKey = await uploadCreatorPoster(posterHorizontal,
+          amount => setProgress((poster ? 40 : 0) + Math.round(amount * 0.4)));
       }
       await updateCreatorContent(submission.id, {
         title: title.trim(),
@@ -1380,6 +1615,7 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
         category,
         isExclusiveVip,
         ...(posterKey ? { posterKey } : {}),
+        ...(posterHorizontalKey ? { posterHorizontalKey } : {}),
       });
       Alert.alert('Changes submitted', 'Your content changes are saved and have been sent for review.');
       onSaved();
@@ -1406,8 +1642,11 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
       <SelectField label="Genre" value={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
       <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
       <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
-      <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={choosePoster}>
-        <Text style={styles.secondaryFlowText}>{poster ? `${poster.name} • ${(poster.size / 1048576).toFixed(1)} MB` : 'Change poster (optional)'}</Text>
+      <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPoster)}>
+        <Text style={styles.secondaryFlowText}>{poster ? `New vertical poster · ${poster.name} • ${(poster.size / 1048576).toFixed(1)} MB` : 'Change vertical poster (optional)'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPosterHorizontal)}>
+        <Text style={styles.secondaryFlowText}>{posterHorizontal ? `New horizontal poster · ${posterHorizontal.name} • ${(posterHorizontal.size / 1048576).toFixed(1)} MB` : 'Change horizontal poster (optional)'}</Text>
       </TouchableOpacity>
       <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isExclusiveVip }} style={styles.secondaryFlowBtn} disabled={busy} onPress={() => setIsExclusiveVip(!isExclusiveVip)}>
         <Text style={styles.secondaryFlowText}>{isExclusiveVip ? '☑ VIP exclusive' : '☐ VIP exclusive'}</Text>
@@ -1493,15 +1732,6 @@ function CampaignScreen({ onBack }: { onBack: () => void }) {
   </ScrollView></View>;
 }
 
-function CheckoutScreen({ onBack }: { onBack: () => void }) {
-  return <View style={styles.flowScreen}><FlowHeader title="VIP Plan Checkout" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
-    <Text style={styles.screenMainTitle}>VIP Plan Checkout</Text><Text style={styles.screenSubTitle}>Unlock every episode without ads</Text>
-    <View style={styles.flowMetric}><Text style={styles.metricCardLabel}>Annual VIP Plan</Text><Text style={styles.metricBigAmount}>RM 119.90</Text><Text style={styles.metricSubInfo}>Billed yearly • Save 33%</Text></View>
-    <FlowField label="Payment method" value="Visa •••• 4242" /><FlowField label="Billing email" value="aleeya@email.com" /><Text style={styles.checkoutTotal}>Total today <Text style={{ color: COLORS.cyan }}>RM 119.90</Text></Text>
-    <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => Alert.alert('Welcome to VIP', 'Your membership is active.')}><Text style={styles.cyanPrimaryBtnText}>Confirm VIP Payment</Text></TouchableOpacity>
-  </ScrollView></View>;
-}
-
 function SupportScreen({ onBack }: { onBack: () => void }) {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
@@ -1572,7 +1802,6 @@ const styles = StyleSheet.create({
   selectCheck: { color: COLORS.cyan, fontSize: 16, fontWeight: '900' },
   uploadProgress: { height: 5, backgroundColor: COLORS.cardBorder, borderRadius: 3, overflow: 'hidden', marginTop: 16 },
   uploadProgressFill: { height: '100%', backgroundColor: COLORS.cyan },
-  checkoutTotal: { color: COLORS.textMuted, fontSize: 13, fontWeight: '800', textAlign: 'right', marginTop: 18 },
   supportChat: { backgroundColor: '#102b3b', borderWidth: 1, borderColor: COLORS.cyanDark, borderRadius: 9, padding: 14, marginTop: 18 },
   chatAgent: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   chatMessage: { color: COLORS.textLight, fontSize: 12, marginTop: 8, lineHeight: 18 },
@@ -1835,6 +2064,7 @@ const styles = StyleSheet.create({
   filterIcon: { color: COLORS.textMuted, fontSize: 16 },
   searchFilterPanel: { marginTop: 14, padding: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, backgroundColor: '#171e27' },
   searchFilterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 5 },
+  searchFilterOptions: { paddingTop: 2 },
   searchFilterToggle: { flex: 1, minHeight: 36, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginRight: 8 },
   searchFilterHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchFilterToggleText: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', paddingHorizontal: 8 },
@@ -1848,8 +2078,6 @@ const styles = StyleSheet.create({
   searchFilterChipActive: { backgroundColor: '#24413f', borderColor: COLORS.cyan },
   searchFilterChipText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
   searchFilterChipTextActive: { color: COLORS.cyan, fontWeight: '800' },
-  searchFilterPair: { flexDirection: 'row', gap: 10, marginTop: 1 },
-  searchFilterGroup: { flex: 1, minWidth: 0 },
   searchFilterInline: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
   searchFilterInlineChip: { paddingHorizontal: 9, paddingVertical: 7 },
   searchResultsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 19, marginBottom: 2 },
@@ -2075,8 +2303,44 @@ const styles = StyleSheet.create({
   profileActions: { marginTop: 25, borderTopWidth: 1, borderColor: '#263243' },
   profileActionRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#263243', paddingHorizontal: 2 },
   profileActionTitle: { color: '#e8edf4', fontSize: 14, fontWeight: '700' },
+  engagementActionSub: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
   profileSignOutRow: { marginTop: 1 },
   profileSignOutText: { color: '#f28b8b', fontSize: 14, fontWeight: '700' },
+  engagementPage: { padding: 18, paddingBottom: 40 },
+  engagementTabs: { flexDirection: 'row', gap: 7, marginTop: 18, marginBottom: 14 },
+  engagementTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9 },
+  engagementTabActive: { borderColor: COLORS.cyan, backgroundColor: '#103344' },
+  engagementTabText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  engagementTabTextActive: { color: COLORS.cyan },
+  engagementError: { color: '#fca5a5', backgroundColor: '#351d25', borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
+  engagementNotice: { color: COLORS.green, backgroundColor: '#15362e', borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
+  engagementLoading: { alignItems: 'center', gap: 12, paddingVertical: 30 },
+  engagementSectionHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 11 },
+  engagementEmpty: { alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 11, padding: 20, marginTop: 7 },
+  engagementEmptyTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 5 },
+  engagementEmptyText: { color: COLORS.textDim, fontSize: 12, lineHeight: 18, paddingVertical: 10 },
+  notificationCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 13, marginTop: 9 },
+  notificationCardUnread: { borderColor: COLORS.cyanDark },
+  notificationHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  notificationTitle: { color: '#fff', fontSize: 13, fontWeight: '800', flexShrink: 1 },
+  notificationUnreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.cyan },
+  notificationBody: { color: COLORS.textMuted, fontSize: 12, lineHeight: 18, marginTop: 6 },
+  notificationDate: { color: COLORS.textDim, fontSize: 10, marginTop: 8 },
+  referralInviteCard: { backgroundColor: '#142033', borderWidth: 1, borderColor: '#26384f', borderRadius: 14, padding: 16, marginTop: 4 },
+  referralInviteEyebrow: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  referralInviteCode: { color: COLORS.cyan, fontSize: 24, fontWeight: '900', letterSpacing: 1.5, marginTop: 8, marginBottom: 8 },
+  referralStatsRow: { flexDirection: 'row', gap: 9, marginTop: 12 },
+  referralStatCard: { flex: 1, alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 13 },
+  engagementStatValue: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },
+  engagementStatLabel: { color: COLORS.textDim, fontSize: 10, textAlign: 'center', marginTop: 4 },
+  engagementRewardsHeading: { marginTop: 21, marginBottom: 4 },
+  referralActivityRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.cardBg, borderRadius: 8, padding: 12, marginTop: 7 },
+  rewardStatus: { color: COLORS.gold, fontSize: 10, fontWeight: '800' },
+  engagementFootnote: { color: COLORS.textDim, fontSize: 10, lineHeight: 15, marginTop: 13 },
+  preferenceRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 9, marginTop: 9 },
+  preferenceCopy: { flex: 1 },
+  preferenceDescription: { color: COLORS.textDim, fontSize: 10, lineHeight: 15, marginTop: 3 },
+  engagementRefresh: { alignItems: 'center', justifyContent: 'center', minHeight: 44, backgroundColor: '#183c46', borderRadius: 10, marginTop: 17 },
   vipHeaderCentered: { color: '#fff', fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 10 },
   vipSubCentered: { color: COLORS.textDim, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 14 },
   planCard: {
