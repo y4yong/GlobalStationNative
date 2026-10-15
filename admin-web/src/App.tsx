@@ -603,7 +603,7 @@ function ContentReview({
     contentType: 'MOVIE',
     description: '',
     rating: 'P13',
-    genre: 'Drama',
+    genre: ['Drama'],
     category: 'Malay Drama',
     isExclusiveVip: false,
     episodeTitle: '',
@@ -626,7 +626,7 @@ function ContentReview({
     return () => { active = false; };
   }, [filter, refresh, reload]);
   const visibleRows = rows.filter(row => `${row.title} ${row.creatorName ?? ''} ${row.creatorEmail ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()));
-  const update = (key: string, value: string | boolean) =>
+  const update = (key: string, value: string | boolean | string[]) =>
     setForm(current => ({ ...current, [key]: value }));
   const validateFile = (
     file: File | undefined,
@@ -658,6 +658,7 @@ function ContentReview({
     setSaving(true);
     setFormError('');
     try {
+      if (!form.genre.length) throw new Error('Choose at least one genre.');
       if (!posterFile || !posterHorizontalFile || !mediaFile)
         throw new Error('Choose vertical and horizontal poster images and an MP4 media file.');
       const [posterKey, posterHorizontalKey, mediaKey] = await Promise.all([
@@ -688,7 +689,7 @@ function ContentReview({
         contentType: 'MOVIE',
         description: '',
         rating: 'P13',
-        genre: 'Drama',
+        genre: ['Drama'],
         category: 'Malay Drama',
         isExclusiveVip: false,
         episodeTitle: '',
@@ -814,17 +815,27 @@ function ContentReview({
                 {mediaFile ? ` Selected: ${mediaFile.name}` : ''}
               </small>
             </label>
-            <label>
-              Genre
-              <select
-                value={form.genre}
-                onChange={event => update('genre', event.target.value)}
-              >
-                {contentGenres.map(value => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
-            </label>
+            <fieldset className="genre-select">
+              <legend>Genre</legend>
+              <div className="genre-options" role="group" aria-label="Choose one or more genres">
+                {contentGenres.map(value => {
+                  const selected = form.genre.includes(value);
+                  return (
+                    <label className={selected ? 'genre-option selected' : 'genre-option'} key={value}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => update('genre', selected
+                          ? form.genre.filter(genre => genre !== value)
+                          : [...form.genre, value])}
+                      />
+                      <span>{value}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <small>Choose one or more genres.</small>
+            </fieldset>
             <label>
               Category
               <select

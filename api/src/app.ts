@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { contentCategories, contentGenres } from './contentOptions.js';
+import { contentCategories, contentGenreSchema } from './contentOptions.js';
 import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
 import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
@@ -362,7 +362,7 @@ app.patch('/api/v1/creator/submissions/:id', requireAuthenticated, async (reques
       title: z.string().trim().min(2).max(255),
       description: z.string().trim().min(10).max(5000),
       rating: z.enum(['U', 'P12', 'P13', '16', '18']),
-      genre: z.enum(contentGenres),
+      genre: contentGenreSchema,
       category: z.enum(contentCategories),
       isExclusiveVip: z.boolean(),
       posterKey: z.string().min(1).optional(),
@@ -493,7 +493,7 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     posterKey: z.string().min(1),
     posterHorizontalKey: z.string().min(1),
     rating: z.enum(['U', 'P12', 'P13', '16', '18']),
-    genre: z.enum(contentGenres),
+    genre: contentGenreSchema,
     category: z.enum(contentCategories),
     episodeTitle: z.string().trim().min(1).max(255),
     durationSeconds: z.number().int().positive(),

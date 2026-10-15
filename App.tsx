@@ -156,7 +156,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         hidden={adFullscreen}
         {...(Platform.OS === 'android' ? { backgroundColor: COLORS.bg } : {})}
       />
@@ -334,6 +334,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
 
   return (
     <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 24 }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
         <Text style={styles.authLogo}>GLOBAL STATION</Text>
         <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
@@ -343,7 +344,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
         {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
         {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
-        {!!error && <Text style={{ color: '#fca5a5', marginTop: 14 }}>{error}</Text>}
+        {!!error && <Text style={{ color: COLORS.danger, marginTop: 14 }}>{error}</Text>}
         <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={submit}>
           <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account...' : 'Signing in...') : registering ? 'Create account' : 'Sign in'}</Text>
         </TouchableOpacity>
@@ -371,7 +372,10 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
 function HomeTabView({ dramas, loading, error, onRetry, onSelect, onPlay, onSearch, onProfile }: { dramas: DramaItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [filter, setFilter] = useState('All');
   const normalizedFilter = filter.trim().toLowerCase();
-  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [drama.category, drama.genre]).filter(Boolean))).sort()];
+  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [
+    drama.category,
+    ...drama.genre.split(',').map((genre) => genre.trim()).filter(Boolean),
+  ]))).sort()];
   const visibleDramas = filter === 'All'
     ? dramas
     : dramas.filter((d) => {
@@ -514,7 +518,7 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
   }, [query, dramas, loading]);
 
   const filtered = results.filter((d) => {
-    const matchesGenre = selectedGenre === 'All' || d.genre.trim().toLowerCase() === selectedGenre.toLowerCase();
+    const matchesGenre = selectedGenre === 'All' || d.genre.split(',').some((genre) => genre.trim().toLowerCase() === selectedGenre.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || d.category.trim().toLowerCase() === selectedCategory.toLowerCase();
     const matchesType = selectedType === 'All' || d.contentType === selectedType;
     return matchesGenre && matchesCategory && matchesType;
@@ -1150,7 +1154,7 @@ function EngagementScreen({ onBack }: { onBack: () => void }) {
             <View style={styles.preferenceCopy}><Text style={styles.notificationTitle}>{title}</Text><Text style={styles.preferenceDescription}>{description}</Text></View>
             <Switch accessibilityLabel={`${title} preference`} value={preferences[key]} disabled={savingPreference !== null}
               onValueChange={enabled => changePreference(key, enabled)}
-              trackColor={{ false: '#334155', true: COLORS.cyanDark }} thumbColor={preferences[key] ? COLORS.cyan : '#cbd5e1'} />
+              trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={preferences[key] ? COLORS.cyan : '#cbd5e1'} />
           </View>
         ))}
       </>}
@@ -1174,8 +1178,8 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
   const [ad, setAd] = useState<AdPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [secondsUntilSkip, setSecondsUntilSkip] = useState(5);
   const [adPaused, setAdPaused] = useState(false);
+  const [adHasStarted, setAdHasStarted] = useState(false);
   const [adCurrentTime, setAdCurrentTime] = useState(0);
   const [adDuration, setAdDuration] = useState(0);
   const onCompleteRef = useRef(onComplete);
@@ -1214,12 +1218,17 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setAd(null);
+    setAdHasStarted(false);
+    setAdCurrentTime(0);
+    setAdDuration(0);
     getAdPayload().then((payload) => {
       if (!activeRef.current || requestId !== requestIdRef.current) return;
       if (!payload) onCompleteRef.current();
       else {
         lastReportedAdSecond.current = -1;
         completionReported.current = false;
+        setAdPaused(false);
         setAd(payload);
       }
     }).catch((requestError) => {
@@ -1240,12 +1249,6 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
     };
   }, [loadAd]);
 
-  useEffect(() => {
-    if (!ad || secondsUntilSkip <= 0) return;
-    const timer = setTimeout(() => setSecondsUntilSkip((value) => Math.max(0, value - 1)), 1000);
-    return () => clearTimeout(timer);
-  }, [ad, secondsUntilSkip]);
-
   if (error) return <View style={[StyleSheet.absoluteFill, styles.adErrorBackdrop]}>
     <View style={styles.adCard}>
       <Text style={styles.adTitle}>Ad unavailable</Text>
@@ -1261,6 +1264,7 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
     <Text style={styles.adLoadingText}>Loading ad…</Text>
   </View>;
   const adProgress = adDuration > 0 ? Math.min(100, adCurrentTime / adDuration * 100) : 0;
+  const secondsUntilSkip = Math.max(0, 5 - Math.floor(adCurrentTime));
   const formatAdTime = (seconds: number) => {
     const wholeSeconds = Math.max(0, Math.floor(seconds));
     return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
@@ -1281,7 +1285,11 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
       pointerEvents="none"
       style={StyleSheet.absoluteFill}
       onLoad={({ duration }) => { setAdDuration(duration); reportAdProgress(0, duration); }}
-      onProgress={({ currentTime }) => { setAdCurrentTime(currentTime); reportAdProgress(currentTime, adDuration); }}
+      onProgress={({ currentTime }) => {
+        setAdCurrentTime(currentTime);
+        if (currentTime > 0) setAdHasStarted(true);
+        reportAdProgress(currentTime, adDuration);
+      }}
       onEnd={() => { reportAdProgress(adDuration, adDuration, true); onCompleteRef.current(); }}
       onError={() => setError('The ad video could not be played.')}
     />
@@ -1309,7 +1317,7 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
           </View>
           <View style={styles.adActionRow}>
             {ad.clickThroughUrl && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Visit Page" style={styles.adVisitButton} onPress={openAdvertiserPage}><Text style={styles.adVisitButtonText}>Visit Page</Text></TouchableOpacity>}
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={secondsUntilSkip > 0 ? `Skip ad in ${secondsUntilSkip} seconds` : 'Skip ad'} style={[styles.skipBtn, styles.adSkipButton]} disabled={secondsUntilSkip > 0} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>{secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Skip ad'}</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={!adHasStarted ? 'Skip ad unavailable until playback starts' : secondsUntilSkip > 0 ? `Skip ad in ${secondsUntilSkip} seconds` : 'Skip ad'} style={[styles.skipBtn, styles.adSkipButton]} disabled={!adHasStarted || secondsUntilSkip > 0} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>{!adHasStarted ? 'Starting…' : secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Skip ad'}</Text></TouchableOpacity>
           </View>
         </View>
         {!!advertiserDomain && <Text style={styles.adDestination} numberOfLines={1}>{advertiserDomain}</Text>}
@@ -1345,6 +1353,55 @@ function SelectField({ label, value, options, onChange }: { label: string; value
             </TouchableOpacity>)}
           </ScrollView>
           <TouchableOpacity style={styles.secondaryFlowBtn} onPress={() => setVisible(false)}><Text style={styles.secondaryFlowText}>Cancel</Text></TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  </View>;
+}
+
+function MultiSelectField({ label, values, options, onChange }: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+  const [visible, setVisible] = useState(false);
+  const toggleOption = (option: string) => {
+    onChange(values.includes(option) ? values.filter((value) => value !== option) : [...values, option]);
+  };
+
+  return <View style={styles.flowField}>
+    <Text style={styles.flowLabel}>{label}</Text>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${values.length ? values.join(', ') : 'none selected'}`}
+      accessibilityState={{ expanded: visible }}
+      style={styles.selectField}
+      onPress={() => setVisible(true)}
+    >
+      <Text style={values.length ? styles.selectValue : styles.multiSelectPlaceholder} numberOfLines={2}>
+        {values.length ? values.join(', ') : 'Choose one or more'}
+      </Text>
+      <Text style={styles.selectChevron}>⌄</Text>
+    </TouchableOpacity>
+    <Text style={styles.multiSelectHint}>Choose one or more genres.</Text>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
+      <View style={styles.selectModalBackdrop}>
+        <View style={styles.selectModal}>
+          <Text style={styles.selectModalTitle}>{label}</Text>
+          <ScrollView style={{ maxHeight: 360 }}>
+            {options.map((option) => {
+              const selected = values.includes(option);
+              return <TouchableOpacity
+                key={option}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: selected }}
+                style={styles.selectOption}
+                onPress={() => toggleOption(option)}
+              >
+                <Text style={[styles.selectOptionText, selected && styles.selectOptionTextSelected]}>{option}</Text>
+                {selected && <Text style={styles.selectCheck}>✓</Text>}
+              </TouchableOpacity>;
+            })}
+          </ScrollView>
+          <TouchableOpacity style={styles.secondaryFlowBtn} onPress={() => setVisible(false)}>
+            <Text style={styles.secondaryFlowText}>Done</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -1389,7 +1446,7 @@ async function uploadCreatorPoster(poster: CreatorPosterFile, onProgress?: (prog
 function UploadScreen({ onBack }: { onBack: () => void }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [genre, setGenre] = useState('Drama');
+  const [genre, setGenre] = useState<string[]>(['Drama']);
   const [category, setCategory] = useState('Malay Drama');
   const [rating, setRating] = useState('P13');
   const [episodeTitle, setEpisodeTitle] = useState('');
@@ -1429,7 +1486,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
 
   async function submit() {
     if (!video || !poster || !posterHorizontal) { setNotice('Select an MP4 video and both vertical and horizontal posters first.'); return; }
-    if (!title.trim() || !description.trim() || !genre || !category || (contentType === 'SERIES' && !episodeTitle.trim()) || !Number.isSafeInteger(Number(durationSeconds)) || Number(durationSeconds) <= 0) {
+    if (!title.trim() || !description.trim() || genre.length === 0 || !category || (contentType === 'SERIES' && !episodeTitle.trim()) || !Number.isSafeInteger(Number(durationSeconds)) || Number(durationSeconds) <= 0) {
       setNotice('Complete all content details before submitting.');
       return;
     }
@@ -1466,7 +1523,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     <View style={styles.flowField}><Text style={styles.flowLabel}>Title</Text><TextInput value={title} onChangeText={setTitle} editable={!busy} maxLength={255} style={styles.flowInput} /></View>
     {contentType === 'SERIES' && <View style={styles.flowField}><Text style={styles.flowLabel}>First episode title</Text><TextInput value={episodeTitle} onChangeText={setEpisodeTitle} editable={!busy} maxLength={255} style={styles.flowInput} /></View>}
     <View style={styles.flowField}><Text style={styles.flowLabel}>Synopsis</Text><TextInput value={description} onChangeText={setDescription} editable={!busy} maxLength={5000} style={[styles.flowInput, styles.flowTextArea]} multiline textAlignVertical="top" /></View>
-    <SelectField label="Genre" value={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
+    <MultiSelectField label="Genre" values={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
     <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
     <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
     <View style={styles.flowField}><Text style={styles.flowLabel}>Duration (seconds)</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} style={styles.flowInput} keyboardType="number-pad" /></View>
@@ -1570,7 +1627,7 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
 }) {
   const [title, setTitle] = useState(submission.title);
   const [description, setDescription] = useState(submission.description);
-  const [genre, setGenre] = useState(submission.genre);
+  const [genre, setGenre] = useState(submission.genre.split(',').map((value) => value.trim()).filter(Boolean));
   const [category, setCategory] = useState(submission.category);
   const [rating, setRating] = useState(submission.rating);
   const [isExclusiveVip, setIsExclusiveVip] = useState(submission.isExclusiveVip);
@@ -1639,7 +1696,7 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
         <Text style={styles.flowLabel}>Synopsis</Text>
         <TextInput value={description} onChangeText={setDescription} editable={!busy} maxLength={5000} style={[styles.flowInput, styles.flowTextArea]} multiline textAlignVertical="top" />
       </View>
-      <SelectField label="Genre" value={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
+      <MultiSelectField label="Genre" values={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
       <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
       <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
       <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPoster)}>
@@ -1783,26 +1840,28 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   flowScreen: { flex: 1, backgroundColor: COLORS.bg },
   flowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
-  flowHeaderTitle: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  flowHeaderTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
   flowContent: { padding: 16, paddingBottom: 100 },
   flowMetric: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16, marginTop: 16 },
   flowField: { marginTop: 14 },
   flowLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 },
-  flowInput: { minHeight: 44, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: '#fff', paddingHorizontal: 12, paddingVertical: 10, fontSize: 12 },
+  flowInput: { minHeight: 44, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: COLORS.textLight, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12 },
   flowTextArea: { minHeight: 76, textAlignVertical: 'top' },
   selectField: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, paddingHorizontal: 12 },
-  selectValue: { color: '#fff', fontSize: 12 },
+  selectValue: { color: COLORS.textLight, fontSize: 12 },
+  multiSelectPlaceholder: { color: COLORS.textDim, fontSize: 12 },
+  multiSelectHint: { color: COLORS.textDim, fontSize: 11, marginTop: 5 },
   selectChevron: { color: COLORS.cyan, fontSize: 18, fontWeight: '800' },
   selectModalBackdrop: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.72)' },
   selectModal: { maxHeight: '80%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16 },
-  selectModalTitle: { color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 8 },
+  selectModalTitle: { color: COLORS.textLight, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   selectOption: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder, paddingHorizontal: 8 },
   selectOptionText: { color: COLORS.textLight, fontSize: 13 },
   selectOptionTextSelected: { color: COLORS.cyan, fontWeight: '800' },
   selectCheck: { color: COLORS.cyan, fontSize: 16, fontWeight: '900' },
   uploadProgress: { height: 5, backgroundColor: COLORS.cardBorder, borderRadius: 3, overflow: 'hidden', marginTop: 16 },
   uploadProgressFill: { height: '100%', backgroundColor: COLORS.cyan },
-  supportChat: { backgroundColor: '#102b3b', borderWidth: 1, borderColor: COLORS.cyanDark, borderRadius: 9, padding: 14, marginTop: 18 },
+  supportChat: { backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9, padding: 14, marginTop: 18 },
   chatAgent: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   chatMessage: { color: COLORS.textLight, fontSize: 12, marginTop: 8, lineHeight: 18 },
   secondaryFlowBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 10, borderRadius: 7, borderWidth: 1, borderColor: COLORS.cardBorder },
@@ -1835,7 +1894,7 @@ const styles = StyleSheet.create({
   },
   chipActive: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
   chipText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#10201f', fontWeight: '800' },
+  chipTextActive: { color: '#ffffff', fontWeight: '800' },
 
   heroCard: { marginHorizontal: 18, marginTop: 8, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder },
   heroPosterImage: {
@@ -1876,7 +1935,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  heroDramaTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  heroDramaTitle: { color: COLORS.textLight, fontSize: 18, fontWeight: '800' },
   heroSub: { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
   heroBtnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   cyanActionBtn: {
@@ -1887,7 +1946,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 9,
   },
-  cyanActionBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
+  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
   listActionBtn: {
     backgroundColor: COLORS.cardBg,
     paddingVertical: 10,
@@ -1896,7 +1955,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  listActionBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  listActionBtnText: { color: COLORS.textLight, fontWeight: '700', fontSize: 13 },
 
   sectionTitleRow: {
     flexDirection: 'row',
@@ -1905,7 +1964,7 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     marginTop: 16,
   },
-  sectionHeaderTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginLeft: 18, marginTop: 16 },
+  sectionHeaderTitle: { color: COLORS.textLight, fontSize: 18, fontWeight: '700', marginLeft: 18, marginTop: 16 },
   seeAllText: { color: COLORS.cyan, fontSize: 13, fontWeight: '600' },
 
   railList: { paddingHorizontal: 18, paddingVertical: 10, gap: 10 },
@@ -1919,7 +1978,7 @@ const styles = StyleSheet.create({
   },
   continuePosterPlaceholder: {
     height: 84,
-    backgroundColor: '#1a283e',
+    backgroundColor: '#edf2ef',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 6,
@@ -1938,7 +1997,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBg,
     borderRadius: 12,
   },
-  popularCardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18, marginTop: 7 },
+  popularCardTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', lineHeight: 18, marginTop: 7 },
 
   // Drama Details View
   dramaDescription: { color: COLORS.textMuted, fontSize: 15, marginTop: 16, lineHeight: 23 },
@@ -1951,7 +2010,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 14,
   },
-  cyanPrimaryBtnText: { color: '#000', fontSize: 14, fontWeight: '800' },
+  cyanPrimaryBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
   episodeCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1962,7 +2021,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
     marginTop: 10,
   },
-  episodeTitle: { color: '#fff', fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  episodeTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', flexShrink: 1 },
   episodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   cyanSmallBtn: {
     backgroundColor: COLORS.cyan,
@@ -1970,7 +2029,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 6,
   },
-  cyanSmallBtnText: { color: '#000', fontWeight: '800', fontSize: 12 },
+  cyanSmallBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
 
   // Video Player Styles
   playerContainer: { flex: 1, backgroundColor: COLORS.bg },
@@ -2004,7 +2063,7 @@ const styles = StyleSheet.create({
   adPlayerOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, justifyContent: 'space-between', padding: 10 },
   adBrandOverlay: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', maxWidth: '90%', padding: 8, borderRadius: 10, backgroundColor: 'rgba(17,22,29,0.78)' },
   adBrandMark: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cyan },
-  adBrandInitial: { color: '#10201f', fontSize: 18, fontWeight: '900' },
+  adBrandInitial: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
   adBrandCopy: { flex: 1, marginLeft: 9 },
   adBrandLabel: { color: '#e1e5eb', fontSize: 11, marginTop: 2 },
   adTitle: { color: '#fff', fontSize: 14, fontWeight: '800' },
@@ -2019,7 +2078,7 @@ const styles = StyleSheet.create({
   adTimeText: { color: '#fff', fontSize: 10, fontWeight: '600' },
   adActionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   adVisitButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 7, backgroundColor: COLORS.cyan },
-  adVisitButtonText: { color: '#10201f', fontSize: 12, fontWeight: '900' },
+  adVisitButtonText: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
   learnMoreText: { color: COLORS.cyan, fontSize: 12, fontWeight: '700' },
   adSkipButton: { minHeight: 38, paddingHorizontal: 10, borderRadius: 7 },
   adDestination: { color: '#d5d9df', fontSize: 10, marginTop: 5, marginLeft: 44 },
@@ -2047,7 +2106,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playPauseIcon: { color: '#000', fontSize: 18, fontWeight: '900' },
+  playPauseIcon: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
 
   // Search View Styles
   searchBar: {
@@ -2060,22 +2119,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
   },
   searchBarIcon: { color: COLORS.textMuted, fontSize: 16 },
-  searchInput: { flex: 1, height: 44, color: '#fff', paddingHorizontal: 10 },
+  searchInput: { flex: 1, height: 44, color: COLORS.textLight, paddingHorizontal: 10 },
   filterIcon: { color: COLORS.textMuted, fontSize: 16 },
-  searchFilterPanel: { marginTop: 14, padding: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, backgroundColor: '#171e27' },
+  searchFilterPanel: { marginTop: 14, padding: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, backgroundColor: COLORS.cardBg },
   searchFilterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 5 },
   searchFilterOptions: { paddingTop: 2 },
   searchFilterToggle: { flex: 1, minHeight: 36, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginRight: 8 },
   searchFilterHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchFilterToggleText: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', paddingHorizontal: 8 },
   searchFilterTitle: { color: COLORS.textLight, fontSize: 15, fontWeight: '800' },
-  searchFilterCount: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, backgroundColor: '#24413f', alignItems: 'center', justifyContent: 'center' },
+  searchFilterCount: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, backgroundColor: COLORS.cyanSoft, alignItems: 'center', justifyContent: 'center' },
   searchFilterCountText: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   searchFilterReset: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', paddingHorizontal: 7, paddingVertical: 5 },
   searchFilterLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 11 },
   searchFilterRow: { paddingTop: 7, paddingBottom: 2, gap: 7 },
-  searchFilterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: '#202a36', borderWidth: 1, borderColor: '#354251' },
-  searchFilterChipActive: { backgroundColor: '#24413f', borderColor: COLORS.cyan },
+  searchFilterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
+  searchFilterChipActive: { backgroundColor: COLORS.cyanSoft, borderColor: COLORS.cyan },
   searchFilterChipText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
   searchFilterChipTextActive: { color: COLORS.cyan, fontWeight: '800' },
   searchFilterInline: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
@@ -2086,14 +2145,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#3f1d25',
+    backgroundColor: COLORS.dangerSoft,
     borderColor: '#9f1239',
     borderWidth: 1,
     borderRadius: 8,
     padding: 10,
     margin: 16,
   },
-  errorText: { color: '#fecdd3', flex: 1, fontSize: 12, marginRight: 10 },
+  errorText: { color: COLORS.danger, flex: 1, fontSize: 12, marginRight: 10 },
   searchResultCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBg,
@@ -2112,7 +2171,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   searchThumbLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800' },
-  searchResultTitle: { color: '#fff', fontSize: 13, fontWeight: '800', flexShrink: 1 },
+  searchResultTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', flexShrink: 1 },
   searchResultMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
 
   // Creator & Ads Styles
@@ -2127,34 +2186,34 @@ const styles = StyleSheet.create({
   creatorEmpty: { color: COLORS.textDim, fontSize: 12, textAlign: 'center', paddingVertical: 28 },
   creatorContentCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 12, marginBottom: 10 },
   creatorContentHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  creatorPoster: { width: 58, height: 78, borderRadius: 5, backgroundColor: '#172536' },
+  creatorPoster: { width: 58, height: 78, borderRadius: 5, backgroundColor: '#edf2ef' },
   creatorContentInfo: { flex: 1, minWidth: 0 },
   creatorMeta: { color: COLORS.cyan, fontSize: 9, marginTop: 4 },
   creatorStatusApproved: { color: COLORS.green, fontSize: 9, fontWeight: '800', marginTop: 5 },
-  creatorStatusRejected: { color: '#fca5a5', fontSize: 9, fontWeight: '800', marginTop: 5 },
+  creatorStatusRejected: { color: COLORS.danger, fontSize: 9, fontWeight: '800', marginTop: 5 },
   creatorStatusPending: { color: COLORS.gold, fontSize: 9, fontWeight: '800', marginTop: 5 },
   creatorDetailsAction: { color: COLORS.cyan, fontSize: 10, fontWeight: '800', padding: 6 },
-  creatorManageButton: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderColor: COLORS.cyan, borderRadius: 8, backgroundColor: '#112b33' },
+  creatorManageButton: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderColor: COLORS.cyan, borderRadius: 8, backgroundColor: COLORS.cyanSoft },
   creatorManageButtonText: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   creatorStatsRow: { flexDirection: 'row', borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 12, paddingTop: 10 },
   creatorStatCell: { flex: 1 },
-  creatorStatValue: { color: '#fff', fontSize: 12, fontWeight: '800', marginTop: 4 },
+  creatorStatValue: { color: COLORS.textLight, fontSize: 12, fontWeight: '800', marginTop: 4 },
   creatorDetails: { borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 12, paddingTop: 12 },
   creatorContentActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 10, paddingTop: 9 },
-  creatorDeleteAction: { color: '#fca5a5', fontSize: 10, fontWeight: '800', padding: 6 },
-  creatorDetailsHeading: { color: '#fff', fontSize: 11, fontWeight: '800', marginTop: 7, marginBottom: 5 },
+  creatorDeleteAction: { color: COLORS.danger, fontSize: 10, fontWeight: '800', padding: 6 },
+  creatorDetailsHeading: { color: COLORS.textLight, fontSize: 11, fontWeight: '800', marginTop: 7, marginBottom: 5 },
   creatorDetailText: { color: COLORS.textDim, fontSize: 10, lineHeight: 16 },
   creatorEpisodeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   creatorPayoutCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 14, marginTop: 18 },
   creatorPayoutAvailable: { color: COLORS.green, fontSize: 16, fontWeight: '900' },
   creatorPayoutForm: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  creatorPayoutInput: { flex: 1, minHeight: 40, backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: '#fff', paddingHorizontal: 10, fontSize: 11 },
+  creatorPayoutInput: { flex: 1, minHeight: 40, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: COLORS.textLight, paddingHorizontal: 10, fontSize: 11 },
   creatorPayoutRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   creatorHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  screenMainTitle: { color: '#fff', fontSize: 20, fontWeight: '900' },
+  screenMainTitle: { color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
   screenSubTitle: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
   uploadBtn: { backgroundColor: COLORS.cyan, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  uploadBtnText: { color: '#000', fontWeight: '800', fontSize: 12 },
+  uploadBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
   metricCard: {
     backgroundColor: COLORS.cardBg,
     padding: 16,
@@ -2163,7 +2222,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
     marginTop: 16,
   },
-  metricCardLabel: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  metricCardLabel: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
   metricBigAmount: { color: COLORS.cyan, fontSize: 26, fontWeight: '900', marginTop: 6 },
   metricSubInfo: { color: COLORS.textDim, fontSize: 11, marginTop: 4 },
   pipelineCard: {
@@ -2176,11 +2235,11 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
     marginTop: 10,
   },
-  pipelineTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  pipelineTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700' },
   pipelineSub: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
-  badgeWarning: { backgroundColor: '#713f12', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  badgeWarning: { backgroundColor: '#fff3d9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
   badgeWarningText: { color: COLORS.gold, fontSize: 10, fontWeight: '800' },
-  badgeSuccess: { backgroundColor: '#064e3b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  badgeSuccess: { backgroundColor: COLORS.greenSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
   badgeSuccessText: { color: COLORS.green, fontSize: 10, fontWeight: '800' },
 
   campaignCard: {
@@ -2192,7 +2251,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   campaignHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  campaignTitle: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  campaignTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
   campaignSub: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   advertiserPage: { padding: 16, paddingBottom: 96 },
   advertiserHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -2201,51 +2260,51 @@ const styles = StyleSheet.create({
   advertiserSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
   advertiserSummaryCard: { flexBasis: '47%', flexGrow: 1, minWidth: 128, minHeight: 76, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 11 },
   advertiserSummaryLabel: { color: COLORS.textDim, fontSize: 9, fontWeight: '700' },
-  advertiserSummaryValue: { color: '#fff', fontSize: 16, fontWeight: '900', marginTop: 7 },
+  advertiserSummaryValue: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 7 },
   advertiserEmpty: { alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 24, marginTop: 8 },
   advertiserCampaignCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 14, marginTop: 10 },
   advertiserCampaignHeading: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  advertiserStatusActive: { color: COLORS.green, backgroundColor: '#064e3b', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
-  advertiserStatusPaused: { color: COLORS.gold, backgroundColor: '#713f12', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
+  advertiserStatusActive: { color: COLORS.green, backgroundColor: COLORS.greenSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
+  advertiserStatusPaused: { color: COLORS.gold, backgroundColor: '#fff3d9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
   advertiserBudgetHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  advertiserBudgetMain: { color: '#fff', fontSize: 19, fontWeight: '900' },
+  advertiserBudgetMain: { color: COLORS.textLight, fontSize: 19, fontWeight: '900' },
   advertiserBudgetMinor: { color: COLORS.textDim, fontSize: 10, fontWeight: '500' },
   advertiserBudgetTotal: { color: COLORS.textDim, fontSize: 10 },
-  advertiserBudgetTrack: { height: 6, backgroundColor: '#101a27', borderRadius: 4, overflow: 'hidden', marginTop: 10 },
+  advertiserBudgetTrack: { height: 6, backgroundColor: '#e9efeb', borderRadius: 4, overflow: 'hidden', marginTop: 10 },
   advertiserBudgetFill: { height: '100%', backgroundColor: COLORS.cyan, borderRadius: 4 },
   advertiserCampaignStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 12, paddingTop: 12 },
-  advertiserCampaignStatValue: { color: '#fff', fontSize: 11, fontWeight: '800', marginTop: 4 },
+  advertiserCampaignStatValue: { color: COLORS.textLight, fontSize: 11, fontWeight: '800', marginTop: 4 },
   creativePicker: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 62, padding: 11, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, backgroundColor: COLORS.cardBg },
   creativePickerIcon: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },
-  creativePickerTitle: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  creativePickerTitle: { color: COLORS.textLight, fontSize: 11, fontWeight: '800' },
   creativePickerSub: { color: COLORS.textDim, fontSize: 9, marginTop: 4 },
   creativePickerAction: { color: COLORS.cyan, fontSize: 10, fontWeight: '800' },
   campaignChoiceSection: { marginTop: 16 },
   campaignChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 7 },
   campaignChoice: { minHeight: 37, justifyContent: 'center', paddingHorizontal: 12, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7 },
-  campaignChoiceActive: { borderColor: COLORS.cyan, backgroundColor: '#103344' },
+  campaignChoiceActive: { borderColor: COLORS.cyan, backgroundColor: COLORS.cyanSoft },
   campaignChoiceLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   campaignChoiceLabelActive: { color: COLORS.cyan },
   campaignBudgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  campaignBudgetAmount: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  campaignBudgetAmount: { color: COLORS.textLight, fontSize: 15, fontWeight: '900' },
   budgetStepper: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
   campaignPickerHint: { color: COLORS.textDim, fontSize: 9 },
   stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 13 },
   stepperButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7 },
   stepperButtonText: { color: COLORS.cyan, fontSize: 20, fontWeight: '700' },
-  stepperValue: { minWidth: 70, textAlign: 'center', color: '#fff', fontSize: 11, fontWeight: '800' },
-  reachEstimate: { alignItems: 'center', backgroundColor: '#0d1c27', borderWidth: 1, borderColor: '#174b58', borderRadius: 8, padding: 16, marginTop: 18 },
+  stepperValue: { minWidth: 70, textAlign: 'center', color: COLORS.textLight, fontSize: 11, fontWeight: '800' },
+  reachEstimate: { alignItems: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 16, marginTop: 18 },
   reachEstimateLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   reachEstimateValue: { color: COLORS.cyan, fontSize: 28, fontWeight: '900', marginTop: 5 },
   reachEstimateFootnote: { color: COLORS.textDim, fontSize: 9, marginTop: 5, textAlign: 'center' },
-  paramGrid: { backgroundColor: '#0d1624', padding: 10, borderRadius: 8, marginTop: 12 },
+  paramGrid: { backgroundColor: COLORS.cardBg, padding: 10, borderRadius: 8, marginTop: 12 },
   paramRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 2 },
   paramLabel: { color: COLORS.textDim, fontSize: 11 },
-  paramValue: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  paramValue: { color: COLORS.textLight, fontSize: 11, fontWeight: '600' },
   statColumnsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   statBox: {
     flex: 1,
-    backgroundColor: '#0d1624',
+    backgroundColor: COLORS.cardBg,
     padding: 10,
     borderRadius: 8,
     alignItems: 'center',
@@ -2256,15 +2315,15 @@ const styles = StyleSheet.create({
   // Profile View Styles
   profilePage: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 112 },
   profilePageHeader: { marginBottom: 18 },
-  profilePageTitle: { color: '#fff', fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
+  profilePageTitle: { color: COLORS.textLight, fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
   profilePageSubtitle: { color: COLORS.textDim, fontSize: 13, marginTop: 3 },
-  profileHero: { backgroundColor: '#142033', borderWidth: 1, borderColor: '#26384f', borderRadius: 18, padding: 17 },
+  profileHero: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 17 },
   profileUserRow: { flexDirection: 'row', alignItems: 'center' },
   avatarCircle: {
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#173b4a',
+    backgroundColor: COLORS.cyanSoft,
     borderWidth: 1,
     borderColor: COLORS.cyan,
     justifyContent: 'center',
@@ -2273,60 +2332,60 @@ const styles = StyleSheet.create({
   avatarLetter: { color: COLORS.cyan, fontSize: 23, fontWeight: '900' },
   profileIdentity: { flex: 1, minWidth: 0, marginLeft: 14 },
   profileNameLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  profileName: { flexShrink: 1, color: '#fff', fontSize: 19, fontWeight: '900' },
-  profileAccountStatus: { flexDirection: 'row', flexShrink: 0, alignItems: 'center', gap: 5, backgroundColor: '#183b34', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
+  profileName: { flexShrink: 1, color: COLORS.textLight, fontSize: 19, fontWeight: '900' },
+  profileAccountStatus: { flexDirection: 'row', flexShrink: 0, alignItems: 'center', gap: 5, backgroundColor: COLORS.greenSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
   profileAccountStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.green },
   profileAccountStatusText: { color: COLORS.green, fontSize: 9, fontWeight: '800' },
-  profileEmail: { color: '#a0aec0', fontSize: 12, marginTop: 4 },
-  profileHeroDivider: { height: 1, backgroundColor: '#2a394c', marginTop: 17, marginBottom: 14 },
+  profileEmail: { color: COLORS.textDim, fontSize: 12, marginTop: 4 },
+  profileHeroDivider: { height: 1, backgroundColor: COLORS.cardBorder, marginTop: 17, marginBottom: 14 },
   profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
   profileMetaColumn: { flex: 1, minWidth: 0 },
-  profileMetaLabel: { color: '#90a0b3', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  profileMetaValue: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 4 },
+  profileMetaLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  profileMetaValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', marginTop: 4 },
   profileVipValue: { color: COLORS.gold },
   profileSection: { marginTop: 25 },
   profileSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 },
-  profileSectionTitle: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.1 },
+  profileSectionTitle: { color: COLORS.textLight, fontSize: 17, fontWeight: '800', letterSpacing: 0.1 },
   profileActiveLabel: { color: COLORS.green, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
   profileRoleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
-  profileRoleCard: { flex: 1, minWidth: 145, minHeight: 96, backgroundColor: '#142033', borderWidth: 1, borderColor: '#26384f', borderRadius: 15, padding: 13, justifyContent: 'space-between' },
+  profileRoleCard: { flex: 1, minWidth: 145, minHeight: 96, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 15, padding: 13, justifyContent: 'space-between' },
   profileRoleIcon: { color: COLORS.cyan, fontSize: 19, fontWeight: '900' },
-  profileRoleTitle: { color: '#fff', fontSize: 13, fontWeight: '800' },
-  profileRoleArrow: { color: '#94a3b8', fontSize: 24, lineHeight: 26 },
+  profileRoleTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800' },
+  profileRoleArrow: { color: COLORS.textDim, fontSize: 24, lineHeight: 26 },
   profilePlanGrid: { flexDirection: 'row', gap: 10 },
-  profilePlanCard: { flex: 1, minHeight: 80, backgroundColor: '#111b2a', borderWidth: 1, borderColor: '#26384f', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, justifyContent: 'center' },
-  profilePlanName: { color: '#a0aec0', fontSize: 12, fontWeight: '700' },
-  profilePlanPrice: { color: '#fff', fontSize: 16, fontWeight: '900', marginTop: 5 },
-  profileRefreshButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 12, backgroundColor: '#183c46' },
+  profilePlanCard: { flex: 1, minHeight: 80, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, justifyContent: 'center' },
+  profilePlanName: { color: COLORS.textDim, fontSize: 12, fontWeight: '700' },
+  profilePlanPrice: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 5 },
+  profileRefreshButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 12, backgroundColor: COLORS.cyanSoft },
   profileRefreshText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
   profileNotice: { color: COLORS.cyan, fontSize: 12, lineHeight: 18, marginTop: 14 },
-  profileActions: { marginTop: 25, borderTopWidth: 1, borderColor: '#263243' },
-  profileActionRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#263243', paddingHorizontal: 2 },
-  profileActionTitle: { color: '#e8edf4', fontSize: 14, fontWeight: '700' },
+  profileActions: { marginTop: 25, borderTopWidth: 1, borderColor: COLORS.cardBorder },
+  profileActionRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 2 },
+  profileActionTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '700' },
   engagementActionSub: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
   profileSignOutRow: { marginTop: 1 },
-  profileSignOutText: { color: '#f28b8b', fontSize: 14, fontWeight: '700' },
+  profileSignOutText: { color: COLORS.danger, fontSize: 14, fontWeight: '700' },
   engagementPage: { padding: 18, paddingBottom: 40 },
   engagementTabs: { flexDirection: 'row', gap: 7, marginTop: 18, marginBottom: 14 },
   engagementTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9 },
-  engagementTabActive: { borderColor: COLORS.cyan, backgroundColor: '#103344' },
+  engagementTabActive: { borderColor: COLORS.cyan, backgroundColor: COLORS.cyanSoft },
   engagementTabText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700', textAlign: 'center' },
   engagementTabTextActive: { color: COLORS.cyan },
-  engagementError: { color: '#fca5a5', backgroundColor: '#351d25', borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
-  engagementNotice: { color: COLORS.green, backgroundColor: '#15362e', borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
+  engagementError: { color: COLORS.danger, backgroundColor: COLORS.dangerSoft, borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
+  engagementNotice: { color: COLORS.green, backgroundColor: COLORS.greenSoft, borderRadius: 8, padding: 11, marginBottom: 12, fontSize: 12 },
   engagementLoading: { alignItems: 'center', gap: 12, paddingVertical: 30 },
   engagementSectionHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 11 },
   engagementEmpty: { alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 11, padding: 20, marginTop: 7 },
-  engagementEmptyTitle: { color: '#fff', fontSize: 14, fontWeight: '800', marginBottom: 5 },
+  engagementEmptyTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800', marginBottom: 5 },
   engagementEmptyText: { color: COLORS.textDim, fontSize: 12, lineHeight: 18, paddingVertical: 10 },
   notificationCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 13, marginTop: 9 },
   notificationCardUnread: { borderColor: COLORS.cyanDark },
   notificationHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  notificationTitle: { color: '#fff', fontSize: 13, fontWeight: '800', flexShrink: 1 },
+  notificationTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', flexShrink: 1 },
   notificationUnreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.cyan },
   notificationBody: { color: COLORS.textMuted, fontSize: 12, lineHeight: 18, marginTop: 6 },
   notificationDate: { color: COLORS.textDim, fontSize: 10, marginTop: 8 },
-  referralInviteCard: { backgroundColor: '#142033', borderWidth: 1, borderColor: '#26384f', borderRadius: 14, padding: 16, marginTop: 4 },
+  referralInviteCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, padding: 16, marginTop: 4 },
   referralInviteEyebrow: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   referralInviteCode: { color: COLORS.cyan, fontSize: 24, fontWeight: '900', letterSpacing: 1.5, marginTop: 8, marginBottom: 8 },
   referralStatsRow: { flexDirection: 'row', gap: 9, marginTop: 12 },
@@ -2340,8 +2399,8 @@ const styles = StyleSheet.create({
   preferenceRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9, paddingHorizontal: 12, paddingVertical: 9, marginTop: 9 },
   preferenceCopy: { flex: 1 },
   preferenceDescription: { color: COLORS.textDim, fontSize: 10, lineHeight: 15, marginTop: 3 },
-  engagementRefresh: { alignItems: 'center', justifyContent: 'center', minHeight: 44, backgroundColor: '#183c46', borderRadius: 10, marginTop: 17 },
-  vipHeaderCentered: { color: '#fff', fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 10 },
+  engagementRefresh: { alignItems: 'center', justifyContent: 'center', minHeight: 44, backgroundColor: COLORS.cyanSoft, borderRadius: 10, marginTop: 17 },
+  vipHeaderCentered: { color: COLORS.textLight, fontSize: 18, fontWeight: '900', textAlign: 'center', marginTop: 10 },
   vipSubCentered: { color: COLORS.textDim, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 14 },
   planCard: {
     flexDirection: 'row',
@@ -2354,9 +2413,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   planCardActive: { borderColor: COLORS.cyan },
-  planTitle: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  planTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
   planBadgeText: { color: COLORS.gold, fontSize: 11, fontWeight: '700', marginTop: 2 },
-  planPrice: { color: '#fff', fontSize: 14, fontWeight: '900' },
+  planPrice: { color: COLORS.textLight, fontSize: 14, fontWeight: '900' },
   planSub: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   referralCard: {
     backgroundColor: COLORS.cardBg,
@@ -2366,7 +2425,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
     marginTop: 16,
   },
-  referralTitle: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  referralTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800' },
   referralCode: { color: COLORS.textDim, fontSize: 12, marginTop: 4 },
   whatsappBtn: {
     backgroundColor: COLORS.greenBtn,
@@ -2375,7 +2434,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
   },
-  whatsappBtnText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  whatsappBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
   supportCard: {
     backgroundColor: COLORS.cardBg,
     padding: 14,
@@ -2384,7 +2443,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.cardBorder,
     marginTop: 12,
   },
-  supportHeader: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  supportHeader: { color: COLORS.textLight, fontSize: 13, fontWeight: '800' },
   supportSub: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   contactSupportLink: { color: COLORS.cyan, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 
@@ -2395,7 +2454,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 76,
-    backgroundColor: '#0d1a2b',
+    backgroundColor: COLORS.cardBg,
     borderTopWidth: 1,
     borderColor: COLORS.cardBorder,
     flexDirection: 'row',

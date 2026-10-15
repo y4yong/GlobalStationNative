@@ -61,5 +61,8 @@ await applySql(await readFile(path.resolve(engagementPath), 'utf8'));
 const dualPosterPath = fileURLToPath(new URL('../sql/011_dual_content_posters.sql', import.meta.url));
 await applySql(await readFile(path.resolve(dualPosterPath), 'utf8'));
 
+const demoCleanupPath = fileURLToPath(new URL('../sql/012_remove_demo_content_and_ad.sql', import.meta.url));
+await applySql(await readFile(path.resolve(demoCleanupPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

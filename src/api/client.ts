@@ -289,7 +289,7 @@ export function updateCreatorContent(id: string, input: {
   title: string;
   description: string;
   rating: string;
-  genre: string;
+  genre: string[];
   category: string;
   isExclusiveVip: boolean;
   posterKey?: string;
@@ -327,7 +327,7 @@ export function submitCreatorContent(payload: {
   posterKey: string;
   posterHorizontalKey: string;
   rating: string;
-  genre: string;
+  genre: string[];
   category: string;
   episodeTitle: string;
   durationSeconds: number;

@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS content (
   poster_url TEXT NOT NULL,
   backdrop_url TEXT,
   rating VARCHAR(20) NOT NULL DEFAULT 'P13',
-  genre VARCHAR(100) NOT NULL,
+  genre TEXT NOT NULL,
   category VARCHAR(100) NOT NULL,
   language_code VARCHAR(10) NOT NULL DEFAULT 'ms',
   is_featured BOOLEAN NOT NULL DEFAULT FALSE,
@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS content (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+DROP VIEW IF EXISTS published_catalog;
+ALTER TABLE content ALTER COLUMN genre TYPE TEXT;
 ALTER TABLE content ADD COLUMN IF NOT EXISTS origin geography(Point, 4326);
 
 CREATE TABLE IF NOT EXISTS content_rights (
@@ -231,55 +233,6 @@ VALUES
   ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
-INSERT INTO content (
-  id, title, content_type, description, poster_url, backdrop_url, rating,
-  genre, category, language_code, is_featured, is_exclusive_vip, status, origin, created_by
-)
-VALUES (
-  '10000000-0000-0000-0000-000000000001',
-  'The Kuala Lumpur Files',
-  'SERIES',
-  'A detective uncovers a city-wide conspiracy hidden in Kuala Lumpur.',
-  'https://images.unsplash.com/photo-1596422846543-75c6fc197f07',
-  'https://images.unsplash.com/photo-1596422846543-75c6fc197f07',
-  'P13',
-  'Drama',
-  'Featured',
-  'en',
-  TRUE,
-  FALSE,
-  'APPROVED',
-  ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography,
-  '00000000-0000-0000-0000-000000000002'
-)
-ON CONFLICT (id) DO UPDATE
-SET title = EXCLUDED.title,
-    content_type = EXCLUDED.content_type,
-    description = EXCLUDED.description,
-    poster_url = EXCLUDED.poster_url,
-    backdrop_url = EXCLUDED.backdrop_url,
-    rating = EXCLUDED.rating,
-    genre = EXCLUDED.genre,
-    category = EXCLUDED.category,
-    language_code = EXCLUDED.language_code,
-    is_featured = EXCLUDED.is_featured,
-    is_exclusive_vip = EXCLUDED.is_exclusive_vip,
-    status = EXCLUDED.status,
-    origin = EXCLUDED.origin,
-    created_by = EXCLUDED.created_by;
-
-INSERT INTO episodes (id, content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview)
-VALUES
-  ('20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 1, 'The First Clue', 1800, 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', TRUE),
-  ('20000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001', 4, 'The Final Lead', 1860, 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', FALSE)
-ON CONFLICT (id) DO UPDATE
-SET content_id = EXCLUDED.content_id,
-    episode_number = EXCLUDED.episode_number,
-    title = EXCLUDED.title,
-    duration_seconds = EXCLUDED.duration_seconds,
-    hls_manifest_url = EXCLUDED.hls_manifest_url,
-    is_free_preview = EXCLUDED.is_free_preview;
-
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
 VALUES ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'VIP_MONTHLY', 'ACTIVE', now() - interval '12 days', now() + interval '18 days')
 ON CONFLICT (id) DO NOTHING;
@@ -288,26 +241,9 @@ INSERT INTO payment_transactions (id, user_id, subscription_id, provider, provid
 VALUES ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000001', 'FPX', 'GS-SEED-FPX-001', 19.90, 'MYR', 'SUCCEEDED')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO creator_revenue_ledger (id, creator_id, content_id, source_type, gross_amount, creator_share, platform_share)
-VALUES ('50000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'SUBSCRIPTION', 1000.00, 700.00, 300.00)
-ON CONFLICT (id) DO NOTHING;
-
 INSERT INTO payout_requests (id, creator_id, amount, status)
 VALUES ('60000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 350.00, 'PENDING')
 ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO ad_campaigns (id, advertiser_id, campaign_name, creative_video_url, cpm_rate, total_budget, remaining_budget, target_tier, status)
-VALUES ('70000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'Global Station', 'http://localhost:5000/assets/ads/global-station-promo.mp4', 12.50, 25000.00, 18750.00, 'ALL', 'ACTIVE')
-ON CONFLICT (id) DO UPDATE
-SET campaign_name = EXCLUDED.campaign_name,
-    creative_video_url = EXCLUDED.creative_video_url,
-    target_tier = EXCLUDED.target_tier;
-
-INSERT INTO watch_logs (user_id, episode_id, watch_seconds, device_ip, session_uid, latitude, longitude, location)
-VALUES
-  ('00000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', 1280, '127.0.0.1', 'seed-session-001', 3.1390, 101.6869, ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography),
-  ('00000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000004', 860, '127.0.0.1', 'seed-session-002', 3.1390, 101.6869, ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography)
-ON CONFLICT DO NOTHING;
 
 INSERT INTO support_tickets (id, user_id, subject, description, priority, status)
 VALUES ('80000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'Playback stopped unexpectedly', 'The stream stopped after switching networks.', 'NORMAL', 'OPEN')

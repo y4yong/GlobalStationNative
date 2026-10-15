@@ -24,7 +24,12 @@ try {
   for (const statement of dualPosterMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
-  console.log('Integration, analytics, engagement, and dual-poster schema migrations completed.');
+  const demoCleanupPath = fileURLToPath(new URL('../sql/012_remove_demo_content_and_ad.sql', import.meta.url));
+  const demoCleanupMigration = await readFile(path.resolve(demoCleanupPath), 'utf8');
+  for (const statement of demoCleanupMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
+    await pool.query(statement);
+  }
+  console.log('Integration, analytics, engagement, dual-poster, and demo-cleanup migrations completed.');
 } finally {
   await pool.end();
 }
