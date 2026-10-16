@@ -26,8 +26,9 @@ import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCreatorDashboard, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
+import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
 import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
 
@@ -234,6 +235,7 @@ export default function App() {
             <ProtectedVideoPlayer
               episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
               paused={adBreakPhase !== null}
+              shareViewingLocation={profile.locationAnalyticsEnabled}
               onPlaybackProgress={handlePlaybackProgress}
             />
             {adBreakPhase !== null && <AdBreak
@@ -268,7 +270,7 @@ export default function App() {
       ) : currentScreen === 'Support' ? (
         <SupportScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Engagement' ? (
-        <EngagementScreen onBack={() => setCurrentScreen('Tabs')} />
+        <EngagementScreen profile={profile} onBack={() => setCurrentScreen('Tabs')} onLocationSharingChange={async (enabled) => { await setLocationAnalyticsEnabled(enabled); const updated = await getViewerProfile(); setProfile(updated); }} />
       ) : (
         /* SCREEN 1, 4, 5, 6: TAB VIEWS */
         <View style={{ flex: 1 }}>
@@ -964,7 +966,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onRefreshProfile, on
   );
 }
 
-function EngagementScreen({ onBack }: { onBack: () => void }) {
+function EngagementScreen({ profile, onBack, onLocationSharingChange }: { profile: ViewerProfile; onBack: () => void; onLocationSharingChange: (enabled: boolean) => Promise<void> }) {
   const [section, setSection] = useState<'inbox' | 'referrals' | 'preferences'>('inbox');
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [referral, setReferral] = useState<ReferralOverview | null>(null);
@@ -977,6 +979,7 @@ function EngagementScreen({ onBack }: { onBack: () => void }) {
   });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyLocation, setBusyLocation] = useState(false);
   const [savingPreference, setSavingPreference] = useState<keyof NotificationPreferences | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -1049,6 +1052,35 @@ function EngagementScreen({ onBack }: { onBack: () => void }) {
     } finally {
       setSavingPreference(null);
     }
+  }
+
+  function changeLocationSharing(enabled: boolean) {
+    const save = async () => {
+      setBusyLocation(true);
+      setError('');
+      setNotice('');
+      try {
+        if (enabled && !(await requestViewingLocationPermission())) {
+          setNotice('Location permission was not granted.');
+          return;
+        }
+        await onLocationSharingChange(enabled);
+        setNotice(enabled ? 'Location sharing enabled.' : 'Location sharing turned off.');
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : 'Unable to update location sharing.');
+      } finally {
+        setBusyLocation(false);
+      }
+    };
+    if (!enabled) {
+      void save();
+      return;
+    }
+    Alert.alert(
+      'Share approximate location?',
+      'Your location is rounded to about 1 km. OpenStreetMap uses it to estimate your state or area, shown in admin audience analytics while you watch. You can turn this off in Preferences.',
+      [{ text: 'Not now', style: 'cancel' }, { text: 'Continue', onPress: () => { void save(); } }],
+    );
   }
 
   async function shareReferralCode() {
@@ -1157,6 +1189,15 @@ function EngagementScreen({ onBack }: { onBack: () => void }) {
               trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={preferences[key] ? COLORS.cyan : '#cbd5e1'} />
           </View>
         ))}
+        <View style={{ marginTop: 24 }}>
+          <Text style={styles.profileSectionTitle}>Viewing location</Text>
+          <View style={styles.preferenceRow}>
+            <View style={styles.preferenceCopy}><Text style={styles.notificationTitle}>Location</Text></View>
+            <Switch accessibilityLabel="Share location" value={profile.locationAnalyticsEnabled} disabled={busyLocation}
+              onValueChange={changeLocationSharing}
+              trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={profile.locationAnalyticsEnabled ? COLORS.cyan : '#cbd5e1'} />
+          </View>
+        </View>
       </>}
 
       {!loading && <TouchableOpacity accessibilityRole="button" style={styles.engagementRefresh} disabled={busy} onPress={refresh}>

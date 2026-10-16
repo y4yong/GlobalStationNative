@@ -10,6 +10,7 @@ import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
 import { listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
+import { lookupViewerRegion } from './locationRegions.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
 import { createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
 import {
@@ -163,6 +164,24 @@ app.post('/api/v1/auth/upgrade-role', requireAuthenticated, async (request, resp
 
 app.get('/api/v1/auth/me', requireAuthenticated, (request, response) => {
   response.json(getAuthenticatedUser(request));
+});
+
+app.patch('/api/v1/auth/location-sharing', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({ enabled: z.boolean() }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose whether to share viewing location.' });
+    return;
+  }
+  try {
+    const user = getAuthenticatedUser(request);
+    const { rows } = await pool.query<{ location_analytics_enabled: boolean }>(
+      'UPDATE users SET location_analytics_enabled = $1 WHERE id = $2 RETURNING location_analytics_enabled',
+      [input.data.enabled, user.id],
+    );
+    response.json({ locationAnalyticsEnabled: rows[0].location_analytics_enabled });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/v1/notifications', requireAuthenticated, async (request, response, next) => {
@@ -585,6 +604,11 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
     durationSeconds: z.number().int().min(1).max(86_400).nullable(),
     completed: z.boolean().default(false),
     deviceType: deviceTypeSchema.optional(),
+    latitude: z.number().min(-90).max(90).optional(),
+    longitude: z.number().min(-180).max(180).optional(),
+  }).refine(({ latitude, longitude }) => (latitude === undefined && longitude === undefined)
+    || (latitude !== undefined && longitude !== undefined), {
+    message: 'Latitude and longitude must be provided together.',
   }).safeParse(request.body);
   if (!input.success) {
     response.status(400).json({ error: 'INVALID_REQUEST', message: 'Valid playback progress is required.' });
@@ -593,6 +617,10 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
 
   const user = getAuthenticatedUser(request);
   try {
+    if ((input.data.latitude !== undefined || input.data.longitude !== undefined) && !user.locationAnalyticsEnabled) {
+      response.status(403).json({ error: 'LOCATION_SHARING_DISABLED', message: 'Enable viewing location sharing in your profile first.' });
+      return;
+    }
     const { rows } = await pool.query(`
       SELECT e.id FROM episodes e
       JOIN content c ON c.id = e.content_id
@@ -614,6 +642,8 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
       );
       const deviceType = requestDeviceType(request, input.data.deviceType);
       const countryCode = requestCountryCode(request);
+      const latitude = input.data.latitude === undefined ? null : Math.round(input.data.latitude * 100) / 100;
+      const longitude = input.data.longitude === undefined ? null : Math.round(input.data.longitude * 100) / 100;
       const completed = input.data.completed
         && input.data.durationSeconds !== null
         && input.data.positionSeconds >= input.data.durationSeconds * 0.9;
@@ -627,17 +657,23 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
             duration_seconds = GREATEST(COALESCE(duration_seconds, 0), COALESCE($3, 0)),
             completed_at = CASE WHEN $4 THEN COALESCE(completed_at, now()) ELSE completed_at END,
             device_type = COALESCE(device_type, $5),
-            country_code = COALESCE(country_code, $6)
+            country_code = COALESCE(country_code, $6),
+            latitude = COALESCE($8, latitude),
+            longitude = COALESCE($9, longitude),
+            location = CASE WHEN $8::double precision IS NULL OR $9::double precision IS NULL THEN location
+              ELSE ST_SetSRID(ST_MakePoint($9, $8), 4326)::geography END
           WHERE id = $7
-        `, [input.data.watchSeconds, input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode, existing.rows[0].id]);
+        `, [input.data.watchSeconds, input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode, existing.rows[0].id, latitude, longitude]);
       } else {
         await client.query(
           `INSERT INTO watch_logs
             (user_id, episode_id, watch_seconds, device_ip, session_uid, last_seen_at, last_position_seconds,
-             max_position_seconds, duration_seconds, completed_at, device_type, country_code)
-           VALUES ($1, $2, $3, $4, $5, now(), $6, $6, $7, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10)`,
+             max_position_seconds, duration_seconds, completed_at, device_type, country_code, latitude, longitude, location)
+           VALUES ($1, $2, $3, $4, $5, now(), $6, $6, $7, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10,
+             $11, $12, CASE WHEN $11::double precision IS NULL OR $12::double precision IS NULL THEN NULL
+               ELSE ST_SetSRID(ST_MakePoint($12, $11), 4326)::geography END)`,
           [user.id, input.data.episodeId, input.data.watchSeconds, request.ip ?? '127.0.0.1', input.data.sessionUid,
-            input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode],
+            input.data.positionSeconds, input.data.durationSeconds, completed, deviceType, countryCode, latitude, longitude],
         );
       }
       if (input.data.watchSeconds > 0) {
@@ -651,6 +687,9 @@ app.post('/api/v1/streams/progress', requireAuthenticated, async (request, respo
         `, [user.id, input.data.sessionUid, input.data.watchSeconds, deviceType, countryCode]);
       }
       await client.query('COMMIT');
+      if (latitude !== null && longitude !== null) {
+        void lookupViewerRegion(latitude, longitude);
+      }
       response.sendStatus(204);
     } catch (error) {
       await client.query('ROLLBACK');
@@ -842,7 +881,7 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
       WHERE c.status = 'ACTIVE'
         AND c.remaining_budget >= GREATEST(0.01, ROUND(c.cpm_rate / 1000, 2))
         AND c.target_tier IN ('ALL', 'FREE')
-      ORDER BY c.created_at ASC
+      ORDER BY -LN(GREATEST(random(), 0.000001)) / GREATEST(c.cpm_rate, 0.01), c.created_at ASC
       LIMIT 1
       FOR UPDATE OF c SKIP LOCKED
     `);

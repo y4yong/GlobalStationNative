@@ -22,6 +22,7 @@ import {
 import {
   CircleMarker,
   MapContainer,
+  Popup,
   TileLayer,
   useMapEvents,
 } from 'react-leaflet';
@@ -315,6 +316,7 @@ function AnalyticsDashboard({ refresh }: { refresh: number }) {
   }, '') : '#e8ede9 0% 100%';
   const maxProgrammeWatch = Math.max(1, ...data.programmes.map(row => Number(row.watchSeconds)));
   const maxCountryViewers = Math.max(1, ...data.geography.map(row => Number(row.viewers)));
+  const sharedLocations = data.geography.filter(row => row.latitude !== null && row.longitude !== null);
   const revenueTotal = Number(summary.totalRevenue ?? 0);
   const subscriptionShare = revenueTotal ? Number(summary.subscriptionRevenue ?? 0) / revenueTotal * 100 : 0;
   const advertisingShare = revenueTotal ? Number(summary.advertisingRevenue ?? 0) / revenueTotal * 100 : 0;
@@ -372,11 +374,20 @@ function AnalyticsDashboard({ refresh }: { refresh: number }) {
           </div>)}</div> : <Empty text="Programme analytics will appear as viewers watch." />}
         </section>
         <section className="panel analytics-panel">
-          <div className="analytics-panel-heading"><div><p className="section-kicker">REACH</p><h3>Where viewers watch</h3><span>Top countries · 30 days</span></div><Activity size={19} /></div>
-          {data.geography.length ? <div className="analytics-country-list">{data.geography.slice(0, 8).map(row => <div className="analytics-country" key={row.country}>
+          <div className="analytics-panel-heading"><div><p className="section-kicker">REACH</p><h3>Where viewers watch</h3><span>States and countries · 30 days</span></div><Activity size={19} /></div>
+          {sharedLocations.length > 0 && <div className="map-picker">
+            <MapContainer center={[sharedLocations[0].latitude!, sharedLocations[0].longitude!]} zoom={6} scrollWheelZoom className="coordinate-map">
+              <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              {sharedLocations.map((row, index) => <CircleMarker key={`${row.country}-${row.latitude}-${row.longitude}-${index}`} center={[row.latitude!, row.longitude!]} radius={Math.min(18, 6 + Number(row.viewers))} pathOptions={{ color: '#315d48', fillColor: '#7fb18a', fillOpacity: 0.72 }}>
+                <Popup><strong>{row.country}</strong><br />{Number(row.viewers).toLocaleString()} viewers · {Number(row.sessions).toLocaleString()} sessions</Popup>
+              </CircleMarker>)}
+            </MapContainer>
+            <p className="muted">Areas use approximate locations. Map data © OpenStreetMap contributors.</p>
+          </div>}
+          {data.geography.length ? <div className="analytics-country-list">{data.geography.slice(0, 8).map(row => <div className="analytics-country" key={`${row.country}-${row.latitude}-${row.longitude}`}>
             <div><strong>{row.country}</strong><span>{Number(row.sessions).toLocaleString()} sessions</span><b>{Number(row.viewers).toLocaleString()}</b></div>
             <div className="analytics-track"><i className="analytics-track-warm" style={{ width: `${Math.max(2, Number(row.viewers) / maxCountryViewers * 100)}%` }} /></div>
-          </div>)}</div> : <Empty text="Geography is unavailable until a trusted proxy supplies country codes." />}
+          </div>)}</div> : <Empty text="Viewer areas will appear after opted-in viewers watch." />}
         </section>
       </div>
       <div className="analytics-grid">

@@ -64,5 +64,11 @@ await applySql(await readFile(path.resolve(dualPosterPath), 'utf8'));
 const demoCleanupPath = fileURLToPath(new URL('../sql/012_remove_demo_content_and_ad.sql', import.meta.url));
 await applySql(await readFile(path.resolve(demoCleanupPath), 'utf8'));
 
+const viewerLocationPath = fileURLToPath(new URL('../sql/013_viewer_location_sharing.sql', import.meta.url));
+await applySql(await readFile(path.resolve(viewerLocationPath), 'utf8'));
+
+const viewerLocationRegionsPath = fileURLToPath(new URL('../sql/014_viewer_location_regions.sql', import.meta.url));
+await applySql(await readFile(path.resolve(viewerLocationRegionsPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

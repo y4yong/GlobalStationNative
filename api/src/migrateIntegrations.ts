@@ -29,7 +29,17 @@ try {
   for (const statement of demoCleanupMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
-  console.log('Integration, analytics, engagement, dual-poster, and demo-cleanup migrations completed.');
+  const viewerLocationPath = fileURLToPath(new URL('../sql/013_viewer_location_sharing.sql', import.meta.url));
+  const viewerLocationMigration = await readFile(path.resolve(viewerLocationPath), 'utf8');
+  for (const statement of viewerLocationMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
+    await pool.query(statement);
+  }
+  const viewerLocationRegionsPath = fileURLToPath(new URL('../sql/014_viewer_location_regions.sql', import.meta.url));
+  const viewerLocationRegionsMigration = await readFile(path.resolve(viewerLocationRegionsPath), 'utf8');
+  for (const statement of viewerLocationRegionsMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
+    await pool.query(statement);
+  }
+  console.log('Integration, analytics, engagement, dual-poster, demo-cleanup, and location migrations completed.');
 } finally {
   await pool.end();
 }

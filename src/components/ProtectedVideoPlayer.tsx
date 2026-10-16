@@ -3,15 +3,17 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Video, { ViewType } from 'react-native-video';
 import { authorizePlayback, recordPlaybackProgress } from '../api/client';
 import { createSessionFingerprint } from '../core/security/sessionStorage';
+import { getCurrentViewingLocation, ViewingLocation } from '../core/location/viewingLocation';
 import { COLORS } from '../theme/colors';
 
 interface ProtectedVideoPlayerProps {
   episodeId: string;
   paused: boolean;
+  shareViewingLocation: boolean;
   onPlaybackProgress?: (currentTime: number, duration: number) => void;
 }
 
-export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: ProtectedVideoPlayerProps) {
+export function ProtectedVideoPlayer({ episodeId, paused, shareViewingLocation, onPlaybackProgress }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const duration = useRef(0);
@@ -22,6 +24,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
     pendingSeconds: 0,
     positionSeconds: 0,
     completed: false,
+    location: null as ViewingLocation | null,
   });
 
   const flushProgress = useCallback((completed = false, finalPosition?: number) => {
@@ -39,6 +42,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
       session.positionSeconds,
       duration.current > 0 ? Math.floor(duration.current) : null,
       completionForRequest,
+      session.location,
     ).then(() => {
       if (completionForRequest) session.completed = false;
     }).catch((reportError: unknown) => {
@@ -56,6 +60,7 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
       pendingSeconds: 0,
       positionSeconds: 0,
       completed: false,
+      location: null as ViewingLocation | null,
     };
     duration.current = 0;
     playbackProgress.current = session;
@@ -63,6 +68,15 @@ export function ProtectedVideoPlayer({ episodeId, paused, onPlaybackProgress }: 
       flushProgress();
     };
   }, [episodeId, flushProgress]);
+
+  useEffect(() => {
+    if (!shareViewingLocation || paused) return;
+    let active = true;
+    getCurrentViewingLocation().then((location) => {
+      if (active && location) playbackProgress.current.location = location;
+    });
+    return () => { active = false; };
+  }, [episodeId, paused, shareViewingLocation]);
 
   function trackProgress(currentTime: number) {
     const session = playbackProgress.current;

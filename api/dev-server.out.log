@@ -1,0 +1,5 @@
+
+> globalstation-api@1.0.0 dev
+> tsx watch src/server.ts
+
+Global Station API listening on http://localhost:5000

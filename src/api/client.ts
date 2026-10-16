@@ -2,7 +2,21 @@ import { DramaItem, UserRole } from '../data/models/Drama';
 import { createSessionFingerprint, readSession, saveSession } from '../core/security/sessionStorage';
 import { Platform } from 'react-native';
 
-const API_BASE_URL = 'http://10.0.2.2:5000/api/v1';
+const DEFAULT_API_BASE_URL =
+  Platform.OS === 'android'
+    ? 'http://10.0.2.2:5000/api/v1'
+    : 'http://localhost:5000/api/v1';
+
+export const API_BASE_URL = DEFAULT_API_BASE_URL;
+
+export function normalizeUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (Platform.OS === 'android') {
+    return url.replace(/http:\/\/(localhost|127\.0\.0\.1)(?=:|\/)/g, 'http://10.0.2.2');
+  } else {
+    return url.replace(/http:\/\/10\.0\.2\.2(?=:|\/)/g, 'http://localhost');
+  }
+}
 
 export type AnalyticsDeviceType = 'android' | 'ios' | 'web' | 'other';
 function analyticsDeviceType(): AnalyticsDeviceType {
@@ -17,7 +31,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const session = await readSession();
   const headers = new Headers(init?.headers);
   if (session?.jwt) headers.set('Authorization', `Bearer ${session.jwt}`);
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    throw new Error(`Network request failed to ${API_BASE_URL}${path}. Please check your connection or API server.`);
+  }
   if (response.status === 204) return null as T;
   if (!response.ok) {
     const error = await response.json().catch(() => ({})) as { message?: string; error?: string };
@@ -37,6 +56,7 @@ export interface ViewerProfile {
   role: UserRole;
   roles: UserRole[];
   isVip: boolean;
+  locationAnalyticsEnabled: boolean;
 }
 
 interface SessionResponse { token: string; role: UserRole; expiresAt: string }
@@ -71,6 +91,14 @@ export async function upgradeViewerRole(role: 'CREATOR' | 'ADVERTISER'): Promise
 
 export function getViewerProfile(): Promise<ViewerProfile> {
   return request<ViewerProfile>('/auth/me');
+}
+
+export function setLocationAnalyticsEnabled(enabled: boolean): Promise<{ locationAnalyticsEnabled: boolean }> {
+  return request<{ locationAnalyticsEnabled: boolean }>('/auth/location-sharing', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export interface InAppNotification {
@@ -227,7 +255,13 @@ export interface AdvertiserCampaign {
 
 export async function getCatalog(): Promise<DramaItem[]> {
   const catalog = await request<DramaItem[]>('/dramas');
-  return catalog.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0);
+  return catalog
+    .filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0)
+    .map((item) => ({
+      ...item,
+      posterUrl: normalizeUrl(item.posterUrl) ?? undefined,
+      posterHorizontalUrl: normalizeUrl(item.posterHorizontalUrl) ?? undefined,
+    }));
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {
@@ -236,12 +270,16 @@ export async function searchCatalog(query: string): Promise<DramaItem[]> {
   return normalizedQuery ? catalog.filter((item) => item.title.toLowerCase().includes(normalizedQuery)) : catalog;
 }
 
-export function authorizePlayback(episodeId: string): Promise<PlaybackAccess> {
-  return request<PlaybackAccess>('/streams/access', {
+export async function authorizePlayback(episodeId: string): Promise<PlaybackAccess> {
+  const access = await request<PlaybackAccess>('/streams/access', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ episodeId }),
   });
+  return {
+    ...access,
+    manifestUrl: normalizeUrl(access.manifestUrl) ?? access.manifestUrl,
+  };
 }
 
 export function recordPlaybackProgress(
@@ -251,32 +289,48 @@ export function recordPlaybackProgress(
   positionSeconds: number,
   durationSeconds: number | null,
   completed = false,
+  location?: { latitude: number; longitude: number } | null,
 ): Promise<void> {
   return request<void>('/streams/progress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ episodeId, sessionUid, watchSeconds, positionSeconds, durationSeconds, completed, deviceType: analyticsDeviceType() }),
+    body: JSON.stringify({ episodeId, sessionUid, watchSeconds, positionSeconds, durationSeconds, completed, deviceType: analyticsDeviceType(), ...location }),
   });
 }
 
-export function createCreatorUpload(contentLength: number) {
-  return request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/creator/uploads', {
+export async function createCreatorUpload(contentLength: number) {
+  const res = await request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/creator/uploads', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentLength }),
   });
+  return { ...res, uploadUrl: normalizeUrl(res.uploadUrl) ?? res.uploadUrl };
 }
 
-export function createCreatorPosterUpload(contentType: string, contentLength: number) {
-  return request<{ uploadUrl: string; objectKey: string; contentType: string; expiresInSeconds: number; requiredHeaders?: Record<string, string> }>('/creator/uploads/poster', {
+export async function createCreatorPosterUpload(contentType: string, contentLength: number) {
+  const res = await request<{ uploadUrl: string; objectKey: string; contentType: string; expiresInSeconds: number; requiredHeaders?: Record<string, string> }>('/creator/uploads/poster', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentType, contentLength }),
   });
+  return { ...res, uploadUrl: normalizeUrl(res.uploadUrl) ?? res.uploadUrl };
 }
 
-export function listCreatorSubmissions(): Promise<CreatorSubmission[]> {
-  return request<CreatorSubmission[]>('/creator/submissions');
+export async function listCreatorSubmissions(): Promise<CreatorSubmission[]> {
+  const submissions = await request<CreatorSubmission[]>('/creator/submissions');
+  return submissions.map((s) => ({
+    ...s,
+    posterUrl: normalizeUrl(s.posterUrl),
+    posterHorizontalUrl: normalizeUrl(s.posterHorizontalUrl),
+  }));
 }
 
-export function getCreatorDashboard(): Promise<CreatorDashboard> {
-  return request<CreatorDashboard>('/creator/dashboard');
+export async function getCreatorDashboard(): Promise<CreatorDashboard> {
+  const dashboard = await request<CreatorDashboard>('/creator/dashboard');
+  return {
+    ...dashboard,
+    submissions: dashboard.submissions.map((s) => ({
+      ...s,
+      posterUrl: normalizeUrl(s.posterUrl),
+      posterHorizontalUrl: normalizeUrl(s.posterHorizontalUrl),
+    })),
+  };
 }
 
 export function archiveCreatorContent(id: string, archived: boolean) {
@@ -343,10 +397,15 @@ export async function calculatePayout(views: number, revenueShare = 0.3) {
   return { views, revenueShare, amount: Number((views * 0.012 * revenueShare).toFixed(2)) };
 }
 
-export function getAdPayload(): Promise<AdPayload | null> {
-  return request<AdPayload | null>('/ads/next', {
+export async function getAdPayload(): Promise<AdPayload | null> {
+  const ad = await request<AdPayload | null>('/ads/next', {
     headers: { 'X-Device-Type': analyticsDeviceType() },
   });
+  if (!ad) return null;
+  return {
+    ...ad,
+    creativeVideoUrl: normalizeUrl(ad.creativeVideoUrl) ?? ad.creativeVideoUrl,
+  };
 }
 
 export function recordAdProgress(impressionId: string, positionSeconds: number, durationSeconds: number, completed = false) {
@@ -361,14 +420,19 @@ export function recordAdClick(impressionId: string) {
   return request<void>(`/ads/impressions/${encodeURIComponent(impressionId)}/click`, { method: 'POST' });
 }
 
-export function listAdvertiserCampaigns(): Promise<AdvertiserCampaign[]> {
-  return request<AdvertiserCampaign[]>('/advertiser/campaigns');
+export async function listAdvertiserCampaigns(): Promise<AdvertiserCampaign[]> {
+  const campaigns = await request<AdvertiserCampaign[]>('/advertiser/campaigns');
+  return campaigns.map((c) => ({
+    ...c,
+    creativeVideoUrl: normalizeUrl(c.creativeVideoUrl) ?? c.creativeVideoUrl,
+  }));
 }
 
-export function createAdvertiserUpload(contentLength: number) {
-  return request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/advertiser/uploads', {
+export async function createAdvertiserUpload(contentLength: number) {
+  const res = await request<{ uploadUrl: string; objectKey: string; contentType: 'video/mp4'; expiresInSeconds: number }>('/advertiser/uploads', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentLength }),
   });
+  return { ...res, uploadUrl: normalizeUrl(res.uploadUrl) ?? res.uploadUrl };
 }
 
 export function createAdvertiserCampaign(input: {

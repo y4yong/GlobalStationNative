@@ -17,7 +17,7 @@ export interface AnalyticsData {
   daily: Array<{ day: string; viewers: number; watchSeconds: number; sessions: number }>;
   programmes: Array<{ id: string; title: string; sessions: number; viewers: number; watchSeconds: number; completionRate: number; dropoffPercent: number }>;
   devices: Array<{ device: string; viewers: number; sessions: number; watchSeconds: number }>;
-  geography: Array<{ country: string; viewers: number; sessions: number }>;
+  geography: Array<{ country: string; latitude: number | null; longitude: number | null; viewers: number; sessions: number }>;
   advertising: Array<{ id: string; campaignName: string; impressions: number; completions: number; clicks: number; clickThroughRate: number; completionRate: number; revenue: string }>;
   churn: Array<{ userId: string; name: string; email: string; planCode: string; reason: string; occurredAt: string }>;
 }

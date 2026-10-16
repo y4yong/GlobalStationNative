@@ -14,7 +14,7 @@ export const registerSchema = z.object({
 });
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
-export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean }
+export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean }
 interface AuthenticatedRequest extends Request { authenticatedUser?: AuthenticatedUser }
 
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
@@ -109,9 +109,11 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: UserRole;
       roles: UserRole[];
       is_vip: boolean;
+      location_analytics_enabled: boolean;
       status: string;
     }>(`SELECT id, name, email, role, status,
         ARRAY(SELECT role FROM user_roles WHERE user_id = users.id) AS roles,
+        location_analytics_enabled,
         (is_vip OR EXISTS (
           SELECT 1 FROM subscriptions s
           WHERE s.user_id = users.id AND s.status = 'ACTIVE'
@@ -130,6 +132,7 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: user.role,
       roles: Array.from(new Set([user.role, ...user.roles])),
       isVip: user.is_vip,
+      locationAnalyticsEnabled: user.location_analytics_enabled,
     };
     next();
   } catch (error) {

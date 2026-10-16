@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
 import { signAdminPlaybackUrl } from './mediaStorage.js';
+import { lookupViewerRegion } from './locationRegions.js';
 import { contentCategories, contentGenreSchema } from './contentOptions.js';
 
 interface AdminRequest extends Request { adminUserId?: string }
@@ -34,6 +35,17 @@ export async function adminOverview() {
 }
 
 export async function adminAnalytics() {
+  const sharedCoordinates = await pool.query<{ latitude: number; longitude: number }>(`
+    SELECT DISTINCT ROUND(latitude::numeric, 2)::float8 AS latitude,
+      ROUND(longitude::numeric, 2)::float8 AS longitude
+    FROM watch_logs
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+      AND last_seen_at >= now() - interval '30 days'
+  `);
+  for (const row of sharedCoordinates.rows) {
+    void lookupViewerRegion(row.latitude, row.longitude);
+  }
+
   const [summary, daily, programmes, devices, geography, advertising, churn] = await Promise.all([
     pool.query(`
       WITH active AS (
@@ -143,11 +155,25 @@ export async function adminAnalytics() {
       GROUP BY device_type ORDER BY viewers DESC
     `),
     pool.query(`
-      SELECT COALESCE(country_code, 'Unknown') AS country,
+      SELECT COALESCE(
+          NULLIF(CONCAT_WS(', ', regions.region_name, regions.country_name), ''),
+          regions.country_name, watch.country_code,
+          CASE WHEN watch.latitude IS NULL THEN NULL ELSE 'Resolving area' END
+        ) AS country,
+        ROUND(AVG(watch.latitude)::numeric, 2)::float8 AS latitude,
+        ROUND(AVG(watch.longitude)::numeric, 2)::float8 AS longitude,
         COUNT(DISTINCT user_id)::int AS viewers,
         COUNT(DISTINCT session_uid)::int AS sessions
-      FROM viewer_activity WHERE activity_date >= current_date - interval '29 days'
-      GROUP BY country_code ORDER BY viewers DESC
+      FROM watch_logs watch
+      LEFT JOIN viewer_location_regions regions
+        ON regions.latitude = ROUND(watch.latitude::numeric, 2)
+       AND regions.longitude = ROUND(watch.longitude::numeric, 2)
+      WHERE watch.last_seen_at >= now() - interval '30 days'
+        AND (watch.latitude IS NOT NULL OR watch.country_code IS NOT NULL)
+      GROUP BY 1,
+        CASE WHEN regions.region_name IS NULL THEN ROUND(watch.latitude::numeric, 2) END,
+        CASE WHEN regions.region_name IS NULL THEN ROUND(watch.longitude::numeric, 2) END
+      ORDER BY viewers DESC
     `),
     pool.query(`
       SELECT c.id, c.campaign_name AS "campaignName",
