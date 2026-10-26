@@ -1,0 +1,2 @@
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS location_analytics_enabled BOOLEAN NOT NULL DEFAULT FALSE;

@@ -46,5 +46,29 @@ await applySql(await readFile(path.resolve(rolesPath), 'utf8'));
 const contentArchivePath = fileURLToPath(new URL('../sql/006_content_archive.sql', import.meta.url));
 await applySql(await readFile(path.resolve(contentArchivePath), 'utf8'));
 
+const campaignReviewPath = fileURLToPath(new URL('../sql/007_campaign_review.sql', import.meta.url));
+await applySql(await readFile(path.resolve(campaignReviewPath), 'utf8'));
+
+const campaignAudiencePath = fileURLToPath(new URL('../sql/008_campaign_audience.sql', import.meta.url));
+await applySql(await readFile(path.resolve(campaignAudiencePath), 'utf8'));
+
+const audienceAnalyticsPath = fileURLToPath(new URL('../sql/009_audience_analytics.sql', import.meta.url));
+await applySql(await readFile(path.resolve(audienceAnalyticsPath), 'utf8'));
+
+const engagementPath = fileURLToPath(new URL('../sql/010_engagement_referrals.sql', import.meta.url));
+await applySql(await readFile(path.resolve(engagementPath), 'utf8'));
+
+const dualPosterPath = fileURLToPath(new URL('../sql/011_dual_content_posters.sql', import.meta.url));
+await applySql(await readFile(path.resolve(dualPosterPath), 'utf8'));
+
+const demoCleanupPath = fileURLToPath(new URL('../sql/012_remove_demo_content_and_ad.sql', import.meta.url));
+await applySql(await readFile(path.resolve(demoCleanupPath), 'utf8'));
+
+const viewerLocationPath = fileURLToPath(new URL('../sql/013_viewer_location_sharing.sql', import.meta.url));
+await applySql(await readFile(path.resolve(viewerLocationPath), 'utf8'));
+
+const viewerLocationRegionsPath = fileURLToPath(new URL('../sql/014_viewer_location_regions.sql', import.meta.url));
+await applySql(await readFile(path.resolve(viewerLocationRegionsPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

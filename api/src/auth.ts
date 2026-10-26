@@ -4,17 +4,17 @@ import { z } from 'zod';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from './config.js';
 import { pool } from './db.js';
+import { trackSignupCode } from './engagement.js';
 
 export const loginSchema = z.object({ email: z.string().email(), password: z.string().min(8) });
 export const registerSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().email(),
   password: z.string().min(8),
-  role: z.enum(['VIEWER', 'CREATOR', 'ADVERTISER']).default('VIEWER'),
 });
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
-export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean }
+export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean }
 interface AuthenticatedRequest extends Request { authenticatedUser?: AuthenticatedUser }
 
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
@@ -29,25 +29,22 @@ function createSession(user: Pick<AuthenticatedUser, 'id' | 'role'> & { roles?: 
   };
 }
 
-export async function register(name: string, email: string, password: string, role: UserRole = 'VIEWER'): Promise<LoginResult | null> {
+export async function register(name: string, email: string, password: string, referralCode?: string): Promise<LoginResult | null> {
   const passwordHash = await bcrypt.hash(password, 12);
-  const safeRole: UserRole = role === 'CREATOR' || role === 'ADVERTISER' ? role : 'VIEWER';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows } = await client.query<{ id: string; role: UserRole }>(
       'INSERT INTO users (name, email, password_hash, role) VALUES ($1, lower($2), $3, $4) ON CONFLICT (email) DO NOTHING RETURNING id, role',
-      [name.trim(), email, passwordHash, safeRole],
+      [name.trim(), email, passwordHash, 'VIEWER'],
     );
     if (!rows[0]) {
       await client.query('ROLLBACK');
       return null;
     }
-    if (safeRole === 'CREATOR' || safeRole === 'ADVERTISER') {
-      await client.query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT DO NOTHING', [rows[0].id, safeRole]);
-    }
+    await trackSignupCode(client, rows[0].id, referralCode);
     await client.query('COMMIT');
-    return createSession({ ...rows[0], roles: [safeRole] });
+    return createSession({ ...rows[0], roles: ['VIEWER'] });
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -112,9 +109,11 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: UserRole;
       roles: UserRole[];
       is_vip: boolean;
+      location_analytics_enabled: boolean;
       status: string;
     }>(`SELECT id, name, email, role, status,
         ARRAY(SELECT role FROM user_roles WHERE user_id = users.id) AS roles,
+        location_analytics_enabled,
         (is_vip OR EXISTS (
           SELECT 1 FROM subscriptions s
           WHERE s.user_id = users.id AND s.status = 'ACTIVE'
@@ -133,6 +132,7 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: user.role,
       roles: Array.from(new Set([user.role, ...user.roles])),
       isVip: user.is_vip,
+      locationAnalyticsEnabled: user.location_analytics_enabled,
     };
     next();
   } catch (error) {

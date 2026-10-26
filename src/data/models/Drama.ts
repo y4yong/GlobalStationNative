@@ -3,8 +3,10 @@ export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface Episode {
   id: string;
   title: string;
+  contentType: 'MOVIE' | 'SERIES';
   duration: string;
   rating: string;
+  requiresVip: boolean;
 }
 
 export interface DramaItem {
@@ -15,6 +17,10 @@ export interface DramaItem {
   rating: string;
   badge: 'VIP' | 'FREE';
   posterUrl?: string;
+  posterHorizontalUrl?: string;
+  contentType: 'MOVIE' | 'SERIES';
+  createdAt: string;
+  trendingViews: number;
   progress?: number;
   timeLeft?: string;
   tag?: string;

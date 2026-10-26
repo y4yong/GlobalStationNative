@@ -8,6 +8,7 @@ export async function creatorOverview(creatorId: string) {
     pool.query(`
       SELECT c.id, c.title, c.content_type AS "contentType", c.description,
         c.poster_url AS "posterReference", c.rating, c.genre, c.category, c.status,
+        c.poster_horizontal_url AS "posterHorizontalReference",
         c.is_exclusive_vip AS "isExclusiveVip", c.is_archived AS "isArchived", c.created_at AS "createdAt",
         COALESCE(metrics.episode_count, 0)::int AS "episodeCount",
         COALESCE(metrics.views, 0)::int AS views,
@@ -66,6 +67,7 @@ export async function creatorOverview(creatorId: string) {
     submissions: contentResult.rows.map(content => ({
       ...content,
       posterUrl: content.posterReference ? signPlaybackUrl(content.posterReference) : null,
+      posterHorizontalUrl: content.posterHorizontalReference ? signPlaybackUrl(content.posterHorizontalReference) : null,
       episodes: content.episodes,
     })),
     payouts: {

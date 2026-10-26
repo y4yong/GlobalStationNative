@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS content (
   description TEXT NOT NULL,
   poster_url TEXT NOT NULL,
   rating VARCHAR(20) NOT NULL DEFAULT 'P13',
-  genre VARCHAR(100) NOT NULL,
+  genre TEXT NOT NULL,
   category VARCHAR(100) NOT NULL,
   is_featured BOOLEAN NOT NULL DEFAULT FALSE,
   is_exclusive_vip BOOLEAN NOT NULL DEFAULT FALSE,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   total_budget NUMERIC(12,2) NOT NULL,
   remaining_budget NUMERIC(12,2) NOT NULL,
   target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE',
-  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING_REVIEW',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

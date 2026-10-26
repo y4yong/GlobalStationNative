@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS content (
   poster_url TEXT NOT NULL,
   backdrop_url TEXT,
   rating VARCHAR(20) NOT NULL DEFAULT 'P13',
-  genre VARCHAR(100) NOT NULL,
+  genre TEXT NOT NULL,
   category VARCHAR(100) NOT NULL,
   language_code VARCHAR(10) NOT NULL DEFAULT 'ms',
   is_featured BOOLEAN NOT NULL DEFAULT FALSE,
@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS content (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+DROP VIEW IF EXISTS published_catalog;
+ALTER TABLE content ALTER COLUMN genre TYPE TEXT;
 ALTER TABLE content ADD COLUMN IF NOT EXISTS origin geography(Point, 4326);
 
 CREATE TABLE IF NOT EXISTS content_rights (
@@ -135,11 +137,12 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   cpm_rate NUMERIC(10,2) NOT NULL CHECK (cpm_rate >= 0),
   total_budget NUMERIC(12,2) NOT NULL CHECK (total_budget >= 0),
   remaining_budget NUMERIC(12,2) NOT NULL CHECK (remaining_budget >= 0),
-  target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE' CHECK (target_tier IN ('ALL', 'FREE', 'VIP')),
+  target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE' CHECK (target_tier IN ('ALL', 'FREE')),
   target_regions geography(MultiPolygon, 4326),
-  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAUSED', 'COMPLETED')),
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'ACTIVE', 'PAUSED', 'REJECTED', 'COMPLETED')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS click_through_url TEXT;
 
 CREATE TABLE IF NOT EXISTS ad_impressions (
   id BIGSERIAL PRIMARY KEY,
@@ -230,7 +233,6 @@ VALUES
   ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
-
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
 VALUES ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'VIP_MONTHLY', 'ACTIVE', now() - interval '12 days', now() + interval '18 days')
 ON CONFLICT (id) DO NOTHING;
@@ -239,23 +241,9 @@ INSERT INTO payment_transactions (id, user_id, subscription_id, provider, provid
 VALUES ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000001', 'FPX', 'GS-SEED-FPX-001', 19.90, 'MYR', 'SUCCEEDED')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO creator_revenue_ledger (id, creator_id, content_id, source_type, gross_amount, creator_share, platform_share)
-VALUES ('50000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'SUBSCRIPTION', 1000.00, 700.00, 300.00)
-ON CONFLICT (id) DO NOTHING;
-
 INSERT INTO payout_requests (id, creator_id, amount, status)
 VALUES ('60000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 350.00, 'PENDING')
 ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO ad_campaigns (id, advertiser_id, campaign_name, creative_video_url, cpm_rate, total_budget, remaining_budget, target_tier, status)
-VALUES ('70000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'North Star EV Launch', 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4', 12.50, 25000.00, 18750.00, 'FREE', 'ACTIVE')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO watch_logs (user_id, episode_id, watch_seconds, device_ip, session_uid, latitude, longitude, location)
-VALUES
-  ('00000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', 1280, '127.0.0.1', 'seed-session-001', 3.1390, 101.6869, ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography),
-  ('00000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000004', 860, '127.0.0.1', 'seed-session-002', 3.1390, 101.6869, ST_SetSRID(ST_MakePoint(101.6869, 3.1390), 4326)::geography)
-ON CONFLICT DO NOTHING;
 
 INSERT INTO support_tickets (id, user_id, subject, description, priority, status)
 VALUES ('80000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000004', 'Playback stopped unexpectedly', 'The stream stopped after switching networks.', 'NORMAL', 'OPEN')

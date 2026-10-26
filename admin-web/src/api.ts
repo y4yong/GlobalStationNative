@@ -12,6 +12,16 @@ function getAdminUploadUrl(uploadUrl: string) {
 
 export interface Session { token: string; role: string; expiresAt: string }
 
+export interface AnalyticsData {
+  summary: Record<string, number | string>;
+  daily: Array<{ day: string; viewers: number; watchSeconds: number; sessions: number }>;
+  programmes: Array<{ id: string; title: string; sessions: number; viewers: number; watchSeconds: number; completionRate: number; dropoffPercent: number }>;
+  devices: Array<{ device: string; viewers: number; sessions: number; watchSeconds: number }>;
+  geography: Array<{ country: string; latitude: number | null; longitude: number | null; viewers: number; sessions: number }>;
+  advertising: Array<{ id: string; campaignName: string; impressions: number; completions: number; clicks: number; clickThroughRate: number; completionRate: number; revenue: string }>;
+  churn: Array<{ userId: string; name: string; email: string; planCode: string; reason: string; occurredAt: string }>;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('gs_admin_token');
   const response = await fetch(`${API_URL}${path}`, {
@@ -44,6 +54,7 @@ export const api = {
   campaigns: () => request<any[]>('/admin/campaigns'),
   payouts: () => request<any[]>('/admin/payouts'),
   telemetry: () => request<any[]>('/admin/telemetry'),
+  analytics: () => request<AnalyticsData>('/admin/analytics'),
   supportTickets: () => request<any[]>('/admin/support'),
   contentStatus: (id: string, status: string) => request<any>(`/admin/content/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   contentArchive: (id: string, archived: boolean) => request<any>(`/admin/content/${id}/archive`, { method: 'PATCH', body: JSON.stringify({ archived }) }),

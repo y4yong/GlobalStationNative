@@ -22,13 +22,18 @@ import {
 import {
   CircleMarker,
   MapContainer,
+  Popup,
   TileLayer,
   useMapEvents,
 } from 'react-leaflet';
-import { api, login } from './api';
+import { AnalyticsData, api, login } from './api';
+import { formatDate, formatDateTime } from './formatDate';
+import { contentCategories, contentGenres } from './contentOptions';
+import globalStationLogo from '../../assets/brand/global-station-logo.png';
 
 type View =
   | 'overview'
+  | 'analytics'
   | 'content'
   | 'payouts'
   | 'campaigns'
@@ -37,6 +42,7 @@ type View =
   | 'support';
 const nav: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'analytics', label: 'Audience analytics', icon: BarChart3 },
   { id: 'content', label: 'Content review', icon: Film },
   { id: 'payouts', label: 'Payouts', icon: CircleDollarSign },
   { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
@@ -44,6 +50,11 @@ const nav: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'telemetry', label: 'Watch telemetry', icon: Activity },
   { id: 'support', label: 'Support tickets', icon: MessagesSquare },
 ];
+
+function getSavedView(): View {
+  const savedView = localStorage.getItem('gs_admin_view');
+  return nav.some(item => item.id === savedView) ? savedView as View : 'overview';
+}
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -78,11 +89,8 @@ function Login() {
         </div>
       </div>
       <form className="login-panel" onSubmit={submit}>
-        <div className="brand-mark">
-          GS<span>•</span>
-        </div>
+        <img className="brand-logo login-brand-logo" src={globalStationLogo} alt="Global Station" />
         <h2>Sign in to Control Room</h2>
-        <p className="muted">Administrator access only.</p>
         <label>
           Email
           <input
@@ -112,12 +120,15 @@ function Login() {
 }
 
 function App() {
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>(getSavedView);
   const [mobileNav, setMobileNav] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [notice, setNotice] = useState('');
   const [overview, setOverview] = useState<any>(null);
   const token = localStorage.getItem('gs_admin_token');
+  useEffect(() => {
+    localStorage.setItem('gs_admin_view', view);
+  }, [view]);
   useEffect(() => {
     if (token)
       api
@@ -144,9 +155,7 @@ function App() {
     <div className="app-shell">
       <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
         <div className="sidebar-brand">
-          <div className="brand-mark">
-            GS<span>•</span>
-          </div>
+          <img className="brand-logo" src={globalStationLogo} alt="Global Station" />
           <div>
             <strong>GLOBAL STATION</strong>
             <small>CONTROL ROOM</small>
@@ -187,7 +196,6 @@ function App() {
             <div className="avatar">A</div>
             <span>
               <strong>Administrator</strong>
-              <small>Full access</small>
             </span>
           </div>
           <button
@@ -247,13 +255,211 @@ function ViewContent({
   refresh: number;
 }) {
   if (view === 'overview') return <Overview overview={overview} />;
+  if (view === 'analytics') return <AnalyticsDashboard refresh={refresh} />;
   if (view === 'content') return <ContentReview action={action} refresh={refresh} />;
   if (view === 'payouts') return <Payouts action={action} />;
-  if (view === 'campaigns') return <Campaigns action={action} />;
+  if (view === 'campaigns') return <Campaigns action={action} refresh={refresh} />;
   if (view === 'users') return <UsersView action={action} refresh={refresh} />;
   if (view === 'support')
     return <SupportTickets action={action} refresh={refresh} />;
   return <Telemetry />;
+}
+
+function AnalyticsDashboard({ refresh }: { refresh: number }) {
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    api.analytics().then(result => {
+      if (active) setData(result);
+    }).catch(requestError => {
+      if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load audience analytics.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [refresh]);
+
+  if (loading && !data) return <><PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" /><section className="panel"><p>Loading analytics…</p></section></>;
+  if (error && !data) return <><PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" /><section className="panel"><p className="form-error">{error}</p></section></>;
+  if (!data) return null;
+
+  const summary = data.summary;
+  const number = (key: string) => Number(summary[key] ?? 0);
+  const money = (value: unknown) => `RM ${Number(value ?? 0).toFixed(2)}`;
+  const duration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+  };
+  const dailyByDate = new Map(data.daily.map(row => [row.day, row]));
+  const latestDay = data.daily.length
+    ? new Date(`${data.daily[data.daily.length - 1].day}T00:00:00Z`)
+    : new Date();
+  const dailySeries = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(latestDay);
+    date.setUTCDate(date.getUTCDate() - (29 - index));
+    const day = date.toISOString().slice(0, 10);
+    return { day, viewers: Number(dailyByDate.get(day)?.viewers ?? 0) };
+  });
+  const deviceTotal = data.devices.reduce((total, row) => total + Number(row.viewers), 0);
+  const deviceColors = ['#287b68', '#d29b48', '#6987ae', '#9c7caa', '#abb5b0'];
+  const deviceGradient = deviceTotal ? data.devices.reduce((gradient, row, index) => {
+    const before = data.devices.slice(0, index).reduce((total, item) => total + Number(item.viewers), 0);
+    const after = before + Number(row.viewers);
+    const from = deviceTotal ? before / deviceTotal * 100 : 0;
+    const to = deviceTotal ? after / deviceTotal * 100 : 0;
+    return `${gradient}${index ? ', ' : ''}${deviceColors[index % deviceColors.length]} ${from}% ${to}%`;
+  }, '') : '#e8ede9 0% 100%';
+  const maxProgrammeWatch = Math.max(1, ...data.programmes.map(row => Number(row.watchSeconds)));
+  const maxCountryViewers = Math.max(1, ...data.geography.map(row => Number(row.viewers)));
+  const sharedLocations = data.geography.filter(row => row.latitude !== null && row.longitude !== null);
+  const revenueTotal = Number(summary.totalRevenue ?? 0);
+  const subscriptionShare = revenueTotal ? Number(summary.subscriptionRevenue ?? 0) / revenueTotal * 100 : 0;
+  const advertisingShare = revenueTotal ? Number(summary.advertisingRevenue ?? 0) / revenueTotal * 100 : 0;
+  const formatDateLabel = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+  return (
+    <>
+      <PageTitle kicker="AUDIENCE INTELLIGENCE" title="Audience analytics" />
+      {error && <section className="panel"><p className="form-error">{error}</p></section>}
+      <div className="analytics-subhead">
+        <p className="muted">A 30-day view of audience growth, viewing behaviour, and revenue. Active viewers are measured from authenticated playback.</p>
+        <span className="analytics-period"><span /> LAST 30 DAYS</span>
+      </div>
+      <section className="analytics-kpis">
+        <article className="analytics-kpi"><span>Daily active viewers</span><strong>{number('dau').toLocaleString()}</strong><small>Today · playback activity</small></article>
+        <article className="analytics-kpi"><span>Monthly active viewers</span><strong>{number('mau').toLocaleString()}</strong><small>Unique viewers · 30 days</small></article>
+        <article className="analytics-kpi"><span>Watch time</span><strong>{duration(number('watchSeconds'))}</strong><small>Across {number('playbackSessions').toLocaleString()} playback sessions</small></article>
+        <article className="analytics-kpi"><span>Total revenue</span><strong>{money(summary.totalRevenue)}</strong><small>ARPU {money(summary.arpu)} · paying viewers</small></article>
+      </section>
+      <section className="analytics-growth-strip">
+        <div><span>Completion rate</span><strong>{number('completionRate').toFixed(1)}%</strong></div>
+        <div><span>Free → Premium</span><strong>{number('freeToPremiumConversionRate').toFixed(1)}%</strong><small>{number('newPremiumSubscribers').toLocaleString()} new subscribers</small></div>
+        <div><span>30-day churn</span><strong>{number('churnRate').toFixed(1)}%</strong><small>{(number('cancelled') + number('termEnded')).toLocaleString()} cancelled or expired</small></div>
+        <div><span>Avg. session watch time</span><strong>{duration(number('averageSessionSeconds'))}</strong><small>{number('failedPayments').toLocaleString()} failed checkouts</small></div>
+      </section>
+      <div className="analytics-grid analytics-grid-primary">
+        <section className="panel analytics-panel analytics-audience-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AUDIENCE TREND</p><h3>Daily active viewers</h3><span>Unique viewers by playback day</span></div><Users size={19} /></div>
+          {data.daily.length ? <AudienceTrendChart rows={dailySeries} /> : <Empty text="Daily audience activity will appear as viewers watch." />}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AUDIENCE MIX</p><h3>Device distribution</h3><span>Share of active viewers · 30 days</span></div><Activity size={19} /></div>
+          {data.devices.length ? <div className="device-chart">
+            <div className="device-donut" style={{ background: `conic-gradient(${deviceGradient})` }}>
+              <div><strong>{deviceTotal.toLocaleString()}</strong><span>viewers</span></div>
+            </div>
+            <div className="device-legend">{data.devices.map((row, index) => <div className="device-legend-row" key={row.device}>
+              <i style={{ background: deviceColors[index % deviceColors.length] }} />
+              <span>{row.device}</span>
+              <strong>{Number(row.viewers).toLocaleString()}</strong>
+              <small>{deviceTotal ? (Number(row.viewers) / deviceTotal * 100).toFixed(0) : 0}%</small>
+            </div>)}</div>
+          </div> : <Empty text="Device mix will appear as viewers watch." />}
+        </section>
+      </div>
+      <div className="analytics-grid">
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">CONTENT PERFORMANCE</p><h3>Most watched programmes</h3><span>Ranked by watch time · 30 days</span></div><Film size={19} /></div>
+          {data.programmes.length ? <div className="analytics-rank-list">{data.programmes.map((row, index) => <div className="analytics-rank-row" key={row.id}>
+            <span className="analytics-rank-number">{String(index + 1).padStart(2, '0')}</span>
+            <div className="analytics-rank-content"><div className="analytics-rank-title"><strong>{row.title}</strong><span>{duration(Number(row.watchSeconds))} · {Number(row.viewers).toLocaleString()} viewers</span></div>
+              <div className="analytics-track"><i style={{ width: `${Math.max(2, Number(row.watchSeconds) / maxProgrammeWatch * 100)}%` }} /></div>
+              <div className="analytics-programme-rates"><span>Completion <b>{Number(row.completionRate).toFixed(1)}%</b></span><span>Drop-off <b>{Number(row.dropoffPercent).toFixed(1)}%</b></span></div>
+            </div>
+          </div>)}</div> : <Empty text="Programme analytics will appear as viewers watch." />}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">REACH</p><h3>Where viewers watch</h3><span>States and countries · 30 days</span></div><Activity size={19} /></div>
+          {sharedLocations.length > 0 && <div className="map-picker">
+            <MapContainer center={[sharedLocations[0].latitude!, sharedLocations[0].longitude!]} zoom={6} scrollWheelZoom className="coordinate-map">
+              <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              {sharedLocations.map((row, index) => <CircleMarker key={`${row.country}-${row.latitude}-${row.longitude}-${index}`} center={[row.latitude!, row.longitude!]} radius={Math.min(18, 6 + Number(row.viewers))} pathOptions={{ color: '#315d48', fillColor: '#7fb18a', fillOpacity: 0.72 }}>
+                <Popup><strong>{row.country}</strong><br />{Number(row.viewers).toLocaleString()} viewers · {Number(row.sessions).toLocaleString()} sessions</Popup>
+              </CircleMarker>)}
+            </MapContainer>
+            <p className="muted">Areas use approximate locations. Map data © OpenStreetMap contributors.</p>
+          </div>}
+          {data.geography.length ? <div className="analytics-country-list">{data.geography.slice(0, 8).map(row => <div className="analytics-country" key={`${row.country}-${row.latitude}-${row.longitude}`}>
+            <div><strong>{row.country}</strong><span>{Number(row.sessions).toLocaleString()} sessions</span><b>{Number(row.viewers).toLocaleString()}</b></div>
+            <div className="analytics-track"><i className="analytics-track-warm" style={{ width: `${Math.max(2, Number(row.viewers) / maxCountryViewers * 100)}%` }} /></div>
+          </div>)}</div> : <Empty text="Viewer areas will appear after opted-in viewers watch." />}
+        </section>
+      </div>
+      <div className="analytics-grid">
+        <section className="panel analytics-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">REVENUE MIX</p><h3>Revenue sources</h3><span>Recorded and estimated revenue · 30 days</span></div><CircleDollarSign size={19} /></div>
+          <div className="revenue-total"><strong>{money(summary.totalRevenue)}</strong><span>Total revenue</span></div>
+          <div className="revenue-stack"><i style={{ width: `${subscriptionShare}%` }} /><i style={{ width: `${advertisingShare}%` }} /></div>
+          <div className="revenue-legend">
+            <div><i /><span>Subscriptions</span><strong>{money(summary.subscriptionRevenue)}</strong><small>{subscriptionShare.toFixed(0)}%</small></div>
+            <div><i /><span>Advertising estimate</span><strong>{money(summary.advertisingRevenue)}</strong><small>{advertisingShare.toFixed(0)}%</small></div>
+          </div>
+          <div className="revenue-foot"><span>Revenue per active viewer</span><strong>{money(summary.revenuePerViewer)}</strong></div>
+        </section>
+        <section className="panel analytics-panel analytics-ad-panel">
+          <div className="analytics-panel-heading"><div><p className="section-kicker">AD PERFORMANCE</p><h3>Campaign delivery</h3><span>Impressions, completion and click-through</span></div><Megaphone size={19} /></div>
+          {data.advertising.length ? <div className="analytics-ad-list">{data.advertising.slice(0, 6).map(row => <div className="analytics-ad-row" key={row.id}>
+            <div className="analytics-ad-title"><strong>{row.campaignName}</strong><span>{Number(row.impressions).toLocaleString()} impressions · {Number(row.clicks).toLocaleString()} clicks</span><b>{money(row.revenue)}</b></div>
+            <div className="analytics-ad-metrics"><span>Completion <strong>{Number(row.completionRate).toFixed(1)}%</strong></span><span>CTR <strong>{Number(row.clickThroughRate).toFixed(2)}%</strong></span></div>
+            <div className="analytics-track analytics-ad-track"><i style={{ width: `${Math.min(100, Math.max(0, Number(row.completionRate)))}%` }} /><b style={{ left: `${Math.min(100, Math.max(0, Number(row.clickThroughRate)))}%` }} /></div>
+          </div>)}</div> : <Empty text="Ad performance will appear after impressions are served." />}
+        </section>
+      </div>
+      <section className="panel table-panel">
+        <div className="panel-heading"><div><p className="section-kicker">RETENTION · 30 DAYS</p><h3>Cancellations and payment stops</h3></div><CircleDollarSign size={20} /></div>
+        <p className="muted">Failed one-time checkouts and expired subscription terms are listed separately from user/admin cancellations.</p>
+        <table><thead><tr><th>Viewer</th><th>Plan</th><th>Outcome</th><th>Date</th></tr></thead><tbody>
+          {data.churn.map(row => <tr key={`${row.userId}-${row.reason}-${row.occurredAt}`}><td><strong>{row.name}</strong><small className="table-sub">{row.email}</small></td><td>{row.planCode}</td><td>{row.reason.replaceAll('_', ' ')}</td><td>{formatDateTime(row.occurredAt)}</td></tr>)}
+        </tbody></table>
+        {!data.churn.length && <Empty text="No recent cancellations, term expirations or failed payments." />}
+      </section>
+    </>
+  );
+}
+
+function AudienceTrendChart({ rows }: { rows: Array<{ day: string; viewers: number }> }) {
+  const width = 720;
+  const height = 245;
+  const padding = { top: 14, right: 14, bottom: 30, left: 42 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const max = Math.max(4, ...rows.map(row => row.viewers));
+  const points = rows.map((row, index) => ({
+    ...row,
+    x: padding.left + index / Math.max(1, rows.length - 1) * plotWidth,
+    y: padding.top + plotHeight - row.viewers / max * plotHeight,
+  }));
+  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
+  const area = `${line} L ${padding.left + plotWidth} ${padding.top + plotHeight} L ${padding.left} ${padding.top + plotHeight} Z`;
+  const labels = [0, Math.floor((rows.length - 1) / 2), rows.length - 1]
+    .filter((index, position, list) => list.indexOf(index) === position)
+    .map(index => ({ index, label: new Date(`${rows[index].day}T00:00:00Z`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', timeZone: 'UTC' }) }));
+
+  return <div className="audience-trend">
+    <div className="audience-trend-summary"><strong>{Math.max(0, ...rows.map(row => row.viewers)).toLocaleString()}</strong><span>peak daily viewers</span></div>
+    <svg className="audience-trend-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily active viewers over the last 30 days">
+      <defs><linearGradient id="audienceTrendFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#287b68" stopOpacity=".24" /><stop offset="100%" stopColor="#287b68" stopOpacity="0" /></linearGradient></defs>
+      {[0, 0.5, 1].map(fraction => {
+        const y = padding.top + plotHeight * fraction;
+        return <g key={fraction}>
+          <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="#e8ece8" strokeDasharray="3 5" />
+          <text x={padding.left - 9} y={y + 4} textAnchor="end" className="audience-axis-label">{Math.round(max * (1 - fraction))}</text>
+        </g>;
+      })}
+      <path d={area} fill="url(#audienceTrendFill)" />
+      <path d={line} fill="none" stroke="#287b68" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      {points.filter((_, index) => index % 5 === 0 || index === points.length - 1).map(point =>
+        <circle key={point.day} cx={point.x} cy={point.y} r="3.5" fill="#fff" stroke="#287b68" strokeWidth="2" />,
+      )}
+    </svg>
+    <div className="audience-trend-dates">{labels.map(({ index, label }) => <span key={index} style={{ left: `${points[index].x / width * 100}%` }}>{label}</span>)}</div>
+    <div className="audience-chart-legend"><i /> Daily active viewers <span>·</span> {rows.length} days</div>
+  </div>;
 }
 
 function Overview({ overview }: { overview: any }) {
@@ -261,30 +467,24 @@ function Overview({ overview }: { overview: any }) {
     {
       label: 'Pending content',
       value: overview?.dramas?.pending ?? '—',
-      note: 'needs review',
       icon: Film,
       tone: 'orange',
     },
     {
       label: 'Published library',
       value: overview?.dramas?.published ?? '—',
-      note: 'approved titles',
       icon: BadgeCheck,
       tone: 'green',
     },
     {
       label: 'Payouts waiting',
       value: overview?.payouts?.pending ?? '—',
-      note: `$${Number(overview?.payouts?.pendingAmount ?? 0).toFixed(
-        2,
-      )} queued`,
       icon: CircleDollarSign,
       tone: 'blue',
     },
     {
       label: '30-day sessions',
       value: overview?.watch?.sessions ?? '—',
-      note: `${overview?.watch?.activeUsers ?? 0} active viewers`,
       icon: BarChart3,
       tone: 'violet',
     },
@@ -293,11 +493,8 @@ function Overview({ overview }: { overview: any }) {
     <>
       <div className="page-intro">
         <div>
-          <p className="section-kicker">{new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date())}</p>
+          <p className="section-kicker">{formatDate(new Date())}</p>
           <h2>Operations overview</h2>
-          <p className="muted">
-            Here is what needs your attention across the station.
-          </p>
         </div>
         <div className="secure-badge">
           <ShieldCheck size={18} /> Audited workspace
@@ -313,7 +510,6 @@ function Overview({ overview }: { overview: any }) {
               </div>
               <p>{card.label}</p>
               <strong>{card.value}</strong>
-              <small>{card.note}</small>
             </article>
           );
         })}
@@ -411,13 +607,14 @@ function ContentReview({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [posterFile, setPosterFile] = useState<File | null>(null);
+  const [posterHorizontalFile, setPosterHorizontalFile] = useState<File | null>(null);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [form, setForm] = useState({
     title: '',
     contentType: 'MOVIE',
     description: '',
     rating: 'P13',
-    genre: 'Drama',
+    genre: ['Drama'],
     category: 'Malay Drama',
     isExclusiveVip: false,
     episodeTitle: '',
@@ -440,7 +637,7 @@ function ContentReview({
     return () => { active = false; };
   }, [filter, refresh, reload]);
   const visibleRows = rows.filter(row => `${row.title} ${row.creatorName ?? ''} ${row.creatorEmail ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()));
-  const update = (key: string, value: string | boolean) =>
+  const update = (key: string, value: string | boolean | string[]) =>
     setForm(current => ({ ...current, [key]: value }));
   const validateFile = (
     file: File | undefined,
@@ -472,10 +669,12 @@ function ContentReview({
     setSaving(true);
     setFormError('');
     try {
-      if (!posterFile || !mediaFile)
-        throw new Error('Choose both a poster image and an MP4 media file.');
-      const [posterKey, mediaKey] = await Promise.all([
+      if (!form.genre.length) throw new Error('Choose at least one genre.');
+      if (!posterFile || !posterHorizontalFile || !mediaFile)
+        throw new Error('Choose vertical and horizontal poster images and an MP4 media file.');
+      const [posterKey, posterHorizontalKey, mediaKey] = await Promise.all([
         api.uploadMediaFile('poster', posterFile),
+        api.uploadMediaFile('poster', posterHorizontalFile),
         api.uploadMediaFile('media', mediaFile),
       ]);
       await api.createContent({
@@ -484,6 +683,7 @@ function ContentReview({
         latitude: form.latitude ? Number(form.latitude) : undefined,
         longitude: form.longitude ? Number(form.longitude) : undefined,
         posterKey,
+        posterHorizontalKey,
         mediaKey,
       });
       action(
@@ -493,13 +693,14 @@ function ContentReview({
       setRows(await api.content(filter));
       setShowForm(false);
       setPosterFile(null);
+      setPosterHorizontalFile(null);
       setMediaFile(null);
       setForm({
         title: '',
         contentType: 'MOVIE',
         description: '',
         rating: 'P13',
-        genre: 'Drama',
+        genre: ['Drama'],
         category: 'Malay Drama',
         isExclusiveVip: false,
         episodeTitle: '',
@@ -521,7 +722,6 @@ function ContentReview({
         <PageTitle
           kicker="LIBRARY GOVERNANCE"
           title="Content review"
-          description="Review creator submissions, inspect every asset and detail, then publish or reject."
         />
         <div className="review-page-actions">
           <button className="secondary-button" onClick={() => setReload(value => value + 1)} disabled={loading}>
@@ -545,7 +745,7 @@ function ContentReview({
               />
             </label>
             <label>
-              Poster image
+              Vertical poster
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -568,8 +768,36 @@ function ContentReview({
                 }}
               />
               <small>
-                JPEG, PNG, or WebP. Maximum 10 MB.
+                Portrait image; JPEG, PNG, or WebP. Maximum 10 MB.
                 {posterFile ? ` Selected: ${posterFile.name}` : ''}
+              </small>
+            </label>
+            <label>
+              Horizontal poster
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                required
+                onChange={event => {
+                  try {
+                    setPosterHorizontalFile(
+                      validateFile(event.target.files?.[0], 'poster'),
+                    );
+                    setFormError('');
+                  } catch (error) {
+                    setPosterHorizontalFile(null);
+                    setFormError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Invalid horizontal poster.',
+                    );
+                    event.target.value = '';
+                  }
+                }}
+              />
+              <small>
+                Landscape image; JPEG, PNG, or WebP. Maximum 10 MB.
+                {posterHorizontalFile ? ` Selected: ${posterHorizontalFile.name}` : ''}
               </small>
             </label>
             <label>
@@ -598,42 +826,34 @@ function ContentReview({
                 {mediaFile ? ` Selected: ${mediaFile.name}` : ''}
               </small>
             </label>
-            <label>
-              Genre
-              <select
-                value={form.genre}
-                onChange={event => update('genre', event.target.value)}
-              >
-                {[
-                  'Action',
-                  'Comedy',
-                  'Crime',
-                  'Documentary',
-                  'Drama',
-                  'Family',
-                  'Horror',
-                  'Romance',
-                  'Science Fiction',
-                  'Thriller',
-                ].map(value => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
-            </label>
+            <fieldset className="genre-select">
+              <legend>Genre</legend>
+              <div className="genre-options" role="group" aria-label="Choose one or more genres">
+                {contentGenres.map(value => {
+                  const selected = form.genre.includes(value);
+                  return (
+                    <label className={selected ? 'genre-option selected' : 'genre-option'} key={value}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => update('genre', selected
+                          ? form.genre.filter(genre => genre !== value)
+                          : [...form.genre, value])}
+                      />
+                      <span>{value}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <small>Choose one or more genres.</small>
+            </fieldset>
             <label>
               Category
               <select
                 value={form.category}
                 onChange={event => update('category', event.target.value)}
               >
-                {[
-                  'Documentary',
-                  'Film',
-                  'Malay Drama',
-                  'Original Series',
-                  'Korean Drama',
-                  'Variety',
-                ].map(value => (
+                {contentCategories.map(value => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
@@ -690,9 +910,6 @@ function ContentReview({
             </label>
             <div className="wide-field">
               <span className="form-label">Origin point (optional)</span>
-              <p className="muted">
-                Click the map to choose coordinates, or enter them below.
-              </p>
               <CoordinatePicker
                 latitude={form.latitude}
                 longitude={form.longitude}
@@ -798,7 +1015,7 @@ function ContentReview({
                   </div>
                 </td>
                 <td><strong>{row.creatorName ?? 'Unknown creator'}</strong><small className="table-sub">{row.creatorEmail ?? 'No creator email'}</small></td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
                 <td><strong>{row.contentType}</strong><small className="table-sub">{row.category} · {row.genre} · {row.rating}</small></td>
                 <td>{row.episodeCount}</td>
                 <td>
@@ -906,8 +1123,8 @@ function ContentInspector({
             <section className="detail-section">
               <h3>Submission</h3>
               <dl className="detail-grid">
-                <div><dt>Submitted</dt><dd>{new Date(detail.createdAt).toLocaleString()}</dd></div>
-                <div><dt>Last updated</dt><dd>{detail.updatedAt ? new Date(detail.updatedAt).toLocaleString() : 'Not updated'}</dd></div>
+                <div><dt>Submitted</dt><dd>{formatDateTime(detail.createdAt)}</dd></div>
+                <div><dt>Last updated</dt><dd>{detail.updatedAt ? formatDateTime(detail.updatedAt) : 'Not updated'}</dd></div>
                 <div><dt>Content ID</dt><dd className="detail-code">{detail.id}</dd></div>
                 <div><dt>Episodes</dt><dd>{detail.episodes.length}</dd></div>
               </dl>
@@ -1008,7 +1225,6 @@ function Payouts({
       <PageTitle
         kicker="REVENUE OPERATIONS"
         title="Payout approvals"
-        description="Review creator earnings before funds leave the platform."
       />
       <section className="panel table-panel">
         <table>
@@ -1028,7 +1244,7 @@ function Payouts({
                   <strong>{row.creatorName}</strong>
                   <small className="table-sub">{row.creatorEmail}</small>
                 </td>
-                <td>{new Date(row.requestedAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.requestedAt)}</td>
                 <td className="amount">${Number(row.amount).toFixed(2)}</td>
                 <td>
                   <Status value={row.status} />
@@ -1073,26 +1289,57 @@ function Payouts({
 
 function Campaigns({
   action,
+  refresh,
 }: {
   action: (work: () => Promise<unknown>, message: string) => void;
+  refresh: number;
 }) {
   const [rows, setRows] = useState<any[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
+  const [selectedCampaign, setSelectedCampaign] = useState<any | null>(null);
   useEffect(() => {
+    let active = true;
+    setError('');
+    setLoading(true);
     api
       .campaigns()
-      .then(setRows)
-      .catch(() => setRows([]));
-  }, []);
+      .then(result => {
+        if (active) setRows(result);
+      })
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : 'Unable to load campaigns.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refresh, reload]);
+  const pendingCount = rows.filter(row => row.status === 'PENDING_REVIEW').length;
   return (
     <>
       <PageTitle
         kicker="ADVERTISING OPERATIONS"
         title="Campaign control"
-        description="Review submitted campaigns and activate or pause delivery."
       />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button className="secondary-button" disabled={loading} onClick={() => setReload(value => value + 1)}>
+          <RefreshCw size={15} /> Refresh campaigns
+        </button>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {loading && <div className="queue-message">Loading campaigns…</div>}
+      {!loading && pendingCount > 0 && (
+        <div className="campaign-review-notice">
+          <strong>{pendingCount} campaign{pendingCount === 1 ? '' : 's'} awaiting review</strong>
+        </div>
+      )}
       <div className="campaign-grid">
         {rows.map(row => (
-          <article className="panel campaign-card" key={row.id}>
+          <article className={`panel campaign-card${row.status === 'PENDING_REVIEW' ? ' pending-review' : ''}`} key={row.id}>
             <div className="campaign-top">
               <div className="campaign-symbol">
                 <Megaphone size={18} />
@@ -1100,7 +1347,12 @@ function Campaigns({
               <Status value={row.status} />
             </div>
             <h3>{row.campaignName}</h3>
-            <p className="muted">Targeting {row.targetTier} viewers</p>
+            {row.status === 'PENDING_REVIEW' && <p className="muted">Awaiting administrator review</p>}
+            <p className="muted">Targeting {row.targetTier === 'ALL' ? 'all ad-supported viewers (VIP excluded)' : 'Free members'}</p>
+            <video className="campaign-preview" controls preload="metadata" src={row.creativeVideoUrl}>
+              Your browser does not support campaign video preview.
+            </video>
+            {row.clickThroughUrl && <a className="campaign-destination" href={row.clickThroughUrl} target="_blank" rel="noreferrer">Open destination page</a>}
             <div className="budget-line">
               <span>Budget remaining</span>
               <strong>RM {Number(row.remainingBudget).toLocaleString()}</strong>
@@ -1131,6 +1383,13 @@ function Campaigns({
                 >
                   Pause campaign
                 </button>
+              ) : row.status === 'PENDING_REVIEW' ? (
+                <button
+                  className="campaign-review-button"
+                  onClick={() => setSelectedCampaign(row)}
+                >
+                  <Eye size={15} /> Review campaign
+                </button>
               ) : row.status === 'PAUSED' ? (
                 <button
                   className="text-button"
@@ -1141,14 +1400,54 @@ function Campaigns({
                     )
                   }
                 >
-                  Activate campaign
+                  Resume campaign
                 </button>
               ) : null}
             </div>
           </article>
         ))}
       </div>
-      {rows.length === 0 && <Empty text="No campaigns have been created." />}
+      {!loading && !error && rows.length === 0 && <Empty text="No campaigns have been created." />}
+      {selectedCampaign && (
+        <div className="modal-backdrop" onMouseDown={event => {
+          if (event.target === event.currentTarget) setSelectedCampaign(null);
+        }}>
+          <section className="confirm-modal campaign-review-modal" role="dialog" aria-modal="true" aria-labelledby="campaign-review-title">
+            <button className="icon-button modal-close" aria-label="Close campaign review" onClick={() => setSelectedCampaign(null)}>
+              <X size={17} />
+            </button>
+            <span className="eyebrow">CAMPAIGN REVIEW</span>
+            <h2 id="campaign-review-title">{selectedCampaign.campaignName}</h2>
+            <video className="campaign-review-video" controls preload="metadata" src={selectedCampaign.creativeVideoUrl}>
+              Your browser does not support campaign video preview.
+            </video>
+            {selectedCampaign.clickThroughUrl && (
+              <a className="campaign-destination" href={selectedCampaign.clickThroughUrl} target="_blank" rel="noreferrer">
+                Open destination page
+              </a>
+            )}
+            <dl className="campaign-review-details">
+              <div><dt>Audience</dt><dd>{selectedCampaign.targetTier === 'ALL' ? 'All ad-supported viewers (VIP excluded)' : 'Free members'}</dd></div>
+              <div><dt>CPM</dt><dd>RM {Number(selectedCampaign.cpmRate).toFixed(2)}</dd></div>
+              <div><dt>Total budget</dt><dd>RM {Number(selectedCampaign.totalBudget).toLocaleString()}</dd></div>
+            </dl>
+            <div className="campaign-review-actions">
+              <button className="reject-button" onClick={() => {
+                setSelectedCampaign(null);
+                action(() => api.campaignStatus(selectedCampaign.id, 'REJECTED'), 'Campaign rejected.');
+              }}>
+                Reject
+              </button>
+              <button className="campaign-approve-button" onClick={() => {
+                setSelectedCampaign(null);
+                action(() => api.campaignStatus(selectedCampaign.id, 'ACTIVE'), 'Campaign approved and activated.');
+              }}>
+                Approve &amp; activate
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </>
   );
 }
@@ -1222,7 +1521,6 @@ function UsersView({
       <PageTitle
         kicker="IDENTITY & ACCESS"
         title="Users"
-        description="Search accounts, filter membership, and manage plans."
       />
       <div className="user-filters">
         <label className="user-search">
@@ -1290,14 +1588,14 @@ function UsersView({
                     (row.isVip ? 'VIP' : 'FREE')}
                   {row.renewsAt && (
                     <small className="table-sub">
-                      Until {new Date(row.renewsAt).toLocaleDateString()}
+                      Until {formatDate(row.renewsAt)}
                     </small>
                   )}
                 </td>
                 <td>
                   <Status value={row.status} />
                 </td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
                 <td>
                   <button
                     className="text-button"
@@ -1416,7 +1714,6 @@ function SupportTickets({
       <PageTitle
         kicker="CUSTOMER CARE"
         title="Support tickets"
-        description="Review customer requests and update their status."
       />
       <section className="panel table-panel">
         <table>
@@ -1458,7 +1755,7 @@ function SupportTickets({
                     <option value="CLOSED">Closed</option>
                   </select>
                 </td>
-                <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                <td>{formatDate(row.createdAt)}</td>
               </tr>
             ))}
           </tbody>
@@ -1485,13 +1782,11 @@ function Telemetry() {
       <PageTitle
         kicker="AUDIENCE INTELLIGENCE"
         title="Watch telemetry"
-        description="A 14-day view of playback activity reported by mobile clients."
       />
       <section className="panel chart-panel">
         <div className="panel-heading">
           <div>
             <h3>Watch minutes</h3>
-            <p className="muted">Daily playback duration</p>
           </div>
           <BarChart3 size={20} />
         </div>
@@ -1524,17 +1819,14 @@ function Telemetry() {
 function PageTitle({
   kicker,
   title,
-  description,
 }: {
   kicker: string;
   title: string;
-  description: string;
 }) {
   return (
     <div className="page-title">
       <p className="section-kicker">{kicker}</p>
       <h2>{title}</h2>
-      <p className="muted">{description}</p>
     </div>
   );
 }
