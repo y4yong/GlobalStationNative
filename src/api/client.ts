@@ -1,7 +1,19 @@
 import { DramaItem, UserRole } from '../data/models/Drama';
 import { createSessionFingerprint, readSession, saveSession } from '../core/security/sessionStorage';
+import { NativeModules, Platform } from 'react-native';
 
-const API_BASE_URL = 'http://10.0.2.2:5000/api/v1';
+function getApiBaseUrl(): string {
+  const emulatorHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  const scriptUrl = NativeModules.SourceCode?.scriptURL;
+  const bundleHost = __DEV__ && typeof scriptUrl === 'string'
+    ? /^https?:\/\/([^/:?#]+)/i.exec(scriptUrl)?.[1]
+    : undefined;
+  const host = bundleHost ?? emulatorHost;
+
+  return `http://${host}:5000/api/v1`;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!API_BASE_URL) {
