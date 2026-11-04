@@ -20,6 +20,7 @@ import {
   Image,
   Modal,
   PanResponder,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TextInputProps, TextProps } from 'react-native';
@@ -32,6 +33,7 @@ import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
 import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
+import { isShortEpisodeDuration } from './src/data/episodeDuration';
 
 const Text = ({ style, ...props }: TextProps) => {
   const textStyle = StyleSheet.flatten(style);
@@ -55,6 +57,13 @@ const TextInput = ({ style, ...props }: TextInputProps) => {
 
 export default function App() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const verticalStageHeight = Math.min(windowWidth * (16 / 9), windowHeight * 0.68);
+  const verticalVideoStageStyle = {
+    width: verticalStageHeight * (9 / 16),
+    height: verticalStageHeight,
+    alignSelf: 'center' as const,
+  };
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
   const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
@@ -246,7 +255,11 @@ export default function App() {
               </TouchableOpacity>
             )}
 
-            <Text style={styles.sectionHeaderTitle}>Episodes</Text>
+            <Text style={styles.sectionHeaderTitle}>
+              {selectedDrama.contentType === 'SERIES'
+                ? `Episodes · ${selectedDrama.episodes.length} so far`
+                : 'Episodes'}
+            </Text>
             {selectedDrama.episodes.map((ep) => (
               <View key={ep.id} style={styles.episodeCard}>
                 <View style={{ flex: 1 }}>
@@ -276,7 +289,11 @@ export default function App() {
             <Text style={styles.playerScreenTitle} numberOfLines={1}>{selectedDrama.title} ({selectedDrama.rating})</Text>
           </View>}
 
-          <View style={[styles.videoStage, adFullscreen && styles.videoStageFullscreen]}>
+          <View style={[
+            styles.videoStage,
+            selectedDrama.contentType === 'SERIES' && verticalVideoStageStyle,
+            adFullscreen && styles.videoStageFullscreen,
+          ]}>
             <ProtectedVideoPlayer
               episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
               paused={adBreakPhase !== null}
@@ -513,8 +530,10 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
 
 function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSelect, onPlay, onContinueWatching, onSearch, onProfile }: { dramas: DramaItem[]; continueWatching: ContinueWatchingItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onContinueWatching: (item: ContinueWatchingItem) => void; onSearch: () => void; onProfile: () => void }) {
   const [homeLane, setHomeLane] = useState('For You');
-  const homeLanes = ['For You', 'Movies', 'Series', 'Music Videos', 'Trending', 'New'];
+  const isMalaysianOriginal = (drama: DramaItem) => ['Malay Drama', 'Original Series'].includes(drama.category);
+  const homeLanes = ['For You', 'Malaysian Originals', 'Movies', 'Series', 'Music Videos', 'Trending', 'New'];
   const laneDramas = dramas.filter(drama => {
+    if (homeLane === 'Malaysian Originals') return isMalaysianOriginal(drama);
     if (homeLane === 'Movies') return drama.contentType === 'MOVIE';
     if (homeLane === 'Series') return drama.contentType === 'SERIES';
     if (homeLane === 'Music Videos') return /music\s*videos?/i.test(drama.category);
@@ -527,7 +546,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
       : laneDramas;
   const homeDramas = visibleDramas.filter((drama) => !drama.progress && drama.id !== visibleDramas[0]?.id);
   const rankedDramas = [...visibleDramas].filter((drama) => !drama.progress).sort((a, b) => b.trendingViews - a.trendingViews).slice(0, 10);
-  const originalSeries = homeDramas.filter((drama) => drama.contentType === 'SERIES').slice(0, 10);
+  const malaysianOriginals = homeDramas.filter(isMalaysianOriginal).slice(0, 10);
   const newReleases = [...homeDramas].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 10);
   const musicVideos = homeDramas.filter((drama) => /music\s*videos?/i.test(drama.category)).slice(0, 10);
   const renderRail = (title: string, items: DramaItem[]) => items.length > 0 && <>
@@ -626,7 +645,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 
       {renderRankedRail()}
       {renderRail('Music Videos', musicVideos)}
-      {renderRail('Original Series', originalSeries)}
+      {renderRail('Malaysian Originals', malaysianOriginals)}
       {renderRail('Fresh Drops', newReleases)}
       {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
@@ -1096,6 +1115,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
           <Text style={styles.profileSectionTitle}>VIP membership</Text>
           {profile.isVip && <Text style={styles.profileActiveLabel}>ACTIVE</Text>}
         </View>
+        <Text style={styles.engagementActionSub}>Free viewing is supported by ads. VIP unlocks exclusive episodes.</Text>
         <View style={styles.profilePlanGrid}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Monthly VIP membership, RM 14.90" style={styles.profilePlanCard} disabled={busyPlan !== null} onPress={() => beginCheckout('VIP_MONTHLY')}>
             <Text style={styles.profilePlanName}>Monthly</Text>
@@ -1731,8 +1751,13 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
 
   async function submit() {
     if (!video || !poster || !posterHorizontal) { setNotice('Select an MP4 video and both vertical and horizontal posters first.'); return; }
-    if (!title.trim() || !description.trim() || genre.length === 0 || !category || (contentType === 'SERIES' && !episodeTitle.trim()) || !Number.isSafeInteger(Number(durationSeconds)) || Number(durationSeconds) <= 0) {
+    const episodeDuration = Number(durationSeconds);
+    if (!title.trim() || !description.trim() || genre.length === 0 || !category || (contentType === 'SERIES' && !episodeTitle.trim()) || !Number.isSafeInteger(episodeDuration) || episodeDuration <= 0) {
       setNotice('Complete all content details before submitting.');
+      return;
+    }
+    if (contentType === 'SERIES' && !isShortEpisodeDuration(episodeDuration)) {
+      setNotice('Series episodes must be between 2 and 5 minutes (120–300 seconds).');
       return;
     }
     setBusy(true);
@@ -1748,7 +1773,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 20 + Math.round(written / Math.max(1, total) * 80))));
       if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
-      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: Number(durationSeconds), mediaKey: upload.objectKey, isExclusiveVip });
+      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip });
       Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
       onBack();
     } catch (error) {
@@ -1760,7 +1785,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
 
   return <View style={styles.flowScreen}><FlowHeader title="Upload content" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
     <Text style={styles.screenMainTitle}>Submit a video</Text>
-    <Text style={styles.screenSubTitle}>Submit an MP4 with vertical and horizontal posters. Content is reviewed before it appears in the catalog.</Text>
+    <Text style={styles.screenSubTitle}>Submit an MP4 with vertical and horizontal posters. Series are made for vertical 9:16 viewing, with 2–5 minute episodes. Content is reviewed before it appears in the catalog.</Text>
     <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={chooseVideo}><Text style={styles.secondaryFlowText}>{video ? `${video.name} • ${(video.size / 1048576).toFixed(1)} MB` : 'Choose MP4 video'}</Text></TouchableOpacity>
     <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPoster)}><Text style={styles.secondaryFlowText}>{poster ? `Vertical poster · ${poster.name} • ${(poster.size / 1048576).toFixed(1)} MB` : 'Choose vertical poster (portrait)'}</Text></TouchableOpacity>
     <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => choosePoster(setPosterHorizontal)}><Text style={styles.secondaryFlowText}>{posterHorizontal ? `Horizontal poster · ${posterHorizontal.name} • ${(posterHorizontal.size / 1048576).toFixed(1)} MB` : 'Choose horizontal poster (landscape)'}</Text></TouchableOpacity>
@@ -1771,7 +1796,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     <MultiSelectField label="Genre" values={genre} options={[...CONTENT_GENRES]} onChange={setGenre} />
     <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
     <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
-    <View style={styles.flowField}><Text style={styles.flowLabel}>Duration (seconds)</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} style={styles.flowInput} keyboardType="number-pad" /></View>
+    <View style={styles.flowField}><Text style={styles.flowLabel}>{contentType === 'SERIES' ? 'Episode duration (120–300 seconds)' : 'Duration (seconds)'}</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} style={styles.flowInput} keyboardType="number-pad" /></View>
     <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isExclusiveVip }} style={styles.secondaryFlowBtn} disabled={busy} onPress={() => setIsExclusiveVip(!isExclusiveVip)}><Text style={styles.secondaryFlowText}>{isExclusiveVip ? '☑ VIP exclusive' : '☐ VIP exclusive'}</Text></TouchableOpacity>
     {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
     {busy && <Text style={styles.screenSubTitle}>Uploading posters and video: {progress}%</Text>}
@@ -1817,8 +1842,8 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
 
   async function submit() {
     const duration = Number(durationSeconds);
-    if (!video || !title.trim() || !Number.isSafeInteger(duration) || duration <= 0) {
-      setNotice('Choose an MP4, enter an episode title, and provide its duration in seconds.');
+    if (!video || !title.trim() || !isShortEpisodeDuration(duration)) {
+      setNotice('Choose an MP4, enter an episode title, and set a duration between 2 and 5 minutes (120–300 seconds).');
       return;
     }
     setBusy(true);
@@ -1840,7 +1865,7 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
     <FlowHeader title="Add episode" onBack={onBack} />
     <ScrollView contentContainerStyle={styles.flowContent}>
       <Text style={styles.screenMainTitle}>Add to {submission.title}</Text>
-      <Text style={styles.screenSubTitle}>Next episode number: {submission.episodeCount + 1}. New episodes are reviewed before they are published.</Text>
+      <Text style={styles.screenSubTitle}>Next episode number: {submission.episodeCount + 1}. Keep episodes vertical (9:16) and 2–5 minutes; ongoing stories can grow to 50+ episodes. New episodes are reviewed before they are published.</Text>
       <View style={styles.flowField}>
         <Text style={styles.flowLabel}>Episode title</Text>
         <TextInput value={title} onChangeText={setTitle} editable={!busy} maxLength={255} placeholder="Enter an episode title" placeholderTextColor={COLORS.textDim} style={styles.flowInput} />
@@ -1853,7 +1878,7 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
       </View>
       <View style={styles.flowField}>
         <Text style={styles.flowLabel}>Duration (seconds)</Text>
-        <TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} keyboardType="number-pad" placeholder="e.g. 1200" placeholderTextColor={COLORS.textDim} style={styles.flowInput} />
+        <TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} keyboardType="number-pad" placeholder="120–300" placeholderTextColor={COLORS.textDim} style={styles.flowInput} />
       </View>
       {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
       {busy && <Text style={styles.screenSubTitle}>Uploading episode: {progress}%</Text>}

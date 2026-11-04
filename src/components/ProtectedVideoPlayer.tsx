@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Video, { ViewType } from 'react-native-video';
+import type { VideoRef } from 'react-native-video';
 import { authorizePlayback, recordPlaybackProgress } from '../api/client';
 import { createSessionFingerprint } from '../core/security/sessionStorage';
 import { getCurrentViewingLocation, ViewingLocation } from '../core/location/viewingLocation';
@@ -18,6 +19,7 @@ interface ProtectedVideoPlayerProps {
 export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurationChange, shareViewingLocation, onPlaybackProgress }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const player = useRef<VideoRef>(null);
   const duration = useRef(0);
   const playbackProgress = useRef({
     episodeId,
@@ -107,21 +109,22 @@ export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurat
   }
 
   return <Video
+    ref={player}
     source={{ uri: stream.manifestUrl }}
     paused={paused}
     controls
     resizeMode="contain"
-    startTime={Math.max(0, startTime)}
-    style={StyleSheet.absoluteFill}
     muted={false}
     volume={1}
     audioOutput="speaker"
     ignoreSilentSwitch="ignore"
-    controls
-    resizeMode="contain"
     viewType={ViewType.TEXTURE}
     style={StyleSheet.absoluteFill}
-    onLoad={({ duration: loadedDuration }) => { duration.current = loadedDuration; onDurationChange?.(loadedDuration); }}
+    onLoad={({ duration: loadedDuration }) => {
+      duration.current = loadedDuration;
+      onDurationChange?.(loadedDuration);
+      if (startTime > 0) player.current?.seek(startTime);
+    }}
     onProgress={({ currentTime }) => {
       trackProgress(currentTime);
       onPlaybackProgress?.(currentTime, duration.current);
