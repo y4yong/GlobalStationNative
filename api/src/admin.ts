@@ -87,7 +87,7 @@ export async function adminAnalytics() {
       ), ad_revenue AS (
         SELECT COALESCE(SUM(GREATEST(0.01, ROUND(c.cpm_rate / 10) / 100)), 0)::numeric(12,2) AS revenue
         FROM ad_impressions i JOIN ad_campaigns c ON c.id = i.campaign_id
-        WHERE i.created_at >= now() - interval '30 days'
+        WHERE i.qualified_at IS NOT NULL AND i.qualified_at >= now() - interval '30 days'
       ), churn AS (
         SELECT COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'CANCELLED' AND s.cancelled_at >= now() - interval '30 days')::int AS cancelled,
           COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'ACTIVE' AND s.renews_at <= now()
@@ -177,17 +177,18 @@ export async function adminAnalytics() {
     `),
     pool.query(`
       SELECT c.id, c.campaign_name AS "campaignName",
-        COUNT(i.id)::int AS impressions, COUNT(i.completed_at)::int AS completions,
-        COUNT(DISTINCT clicks.impression_id)::int AS clicks,
-        CASE WHEN COUNT(i.id) = 0 THEN 0
-          ELSE ROUND(COUNT(DISTINCT clicks.impression_id)::numeric / COUNT(i.id) * 100, 2) END AS "clickThroughRate",
-        CASE WHEN COUNT(i.id) = 0 THEN 0
-          ELSE ROUND(COUNT(i.completed_at)::numeric / COUNT(i.id) * 100, 2) END AS "completionRate",
-        COALESCE(SUM(GREATEST(0.01, ROUND(c.cpm_rate / 10) / 100)), 0)::numeric(12,2)::text AS revenue
+        COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL)::int AS impressions,
+        COUNT(i.completed_at) FILTER (WHERE i.qualified_at IS NOT NULL)::int AS completions,
+        COUNT(DISTINCT clicks.impression_id) FILTER (WHERE i.qualified_at IS NOT NULL)::int AS clicks,
+        CASE WHEN COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL) = 0 THEN 0
+          ELSE ROUND(COUNT(DISTINCT clicks.impression_id) FILTER (WHERE i.qualified_at IS NOT NULL)::numeric / COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL) * 100, 2) END AS "clickThroughRate",
+        CASE WHEN COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL) = 0 THEN 0
+          ELSE ROUND(COUNT(i.completed_at) FILTER (WHERE i.qualified_at IS NOT NULL)::numeric / COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL) * 100, 2) END AS "completionRate",
+        COALESCE(SUM(GREATEST(0.01, ROUND(c.cpm_rate / 10) / 100)) FILTER (WHERE i.qualified_at IS NOT NULL), 0)::numeric(12,2)::text AS revenue
       FROM ad_campaigns c
       LEFT JOIN ad_impressions i ON i.campaign_id = c.id AND i.created_at >= now() - interval '30 days'
       LEFT JOIN ad_clicks clicks ON clicks.impression_id = i.id
-      GROUP BY c.id, c.campaign_name ORDER BY COUNT(i.id) DESC LIMIT 20
+      GROUP BY c.id, c.campaign_name ORDER BY COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL) DESC LIMIT 20
     `),
     pool.query(`
       SELECT u.id AS "userId", u.name, u.email, s.plan_code AS "planCode",

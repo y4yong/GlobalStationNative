@@ -3,25 +3,29 @@ import { createSessionFingerprint, readSession, saveSession } from '../core/secu
 import { NativeModules, Platform } from 'react-native';
 
 function getApiBaseUrl(): string {
-  const emulatorHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
   const scriptUrl = NativeModules.SourceCode?.scriptURL;
   const bundleHost = __DEV__ && typeof scriptUrl === 'string'
     ? /^https?:\/\/([^/:?#]+)/i.exec(scriptUrl)?.[1]
     : undefined;
-  const host = bundleHost ?? emulatorHost;
+  const localBundleHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0', '10.0.2.2']);
+  const reachableBundleHost = bundleHost && !localBundleHosts.has(bundleHost.toLowerCase())
+    ? bundleHost
+    : undefined;
+  // React Native's Android model constant is not consistent across runtimes.
+  // Prefer a reachable Metro/LAN host when supplied; otherwise Android's
+  // emulator bridge is the reliable local API address.
+  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  const host = reachableBundleHost ?? fallbackHost;
 
   return `http://${host}:5000/api/v1`;
 }
 
 export const API_BASE_URL = getApiBaseUrl();
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/i, '');
 
 export function normalizeUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  if (Platform.OS === 'android') {
-    return url.replace(/http:\/\/(localhost|127\.0\.0\.1)(?=:|\/)/g, 'http://10.0.2.2');
-  } else {
-    return url.replace(/http:\/\/10\.0\.2\.2(?=:|\/)/g, 'http://localhost');
-  }
+  return url.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|10\.0\.2\.2)(?::\d+)?(?=\/|[?#]|$)/i, API_ORIGIN);
 }
 
 export type AnalyticsDeviceType = 'android' | 'ios' | 'web' | 'other';
@@ -63,6 +67,9 @@ export interface ViewerProfile {
   roles: UserRole[];
   isVip: boolean;
   locationAnalyticsEnabled: boolean;
+  adPersonalizationEnabled: boolean;
+  adAgeRange: string | null;
+  adGender: 'WOMAN' | 'MAN' | 'NON_BINARY' | 'PREFER_NOT_TO_SAY' | null;
 }
 
 interface SessionResponse { token: string; role: UserRole; expiresAt: string }
@@ -104,6 +111,12 @@ export function setLocationAnalyticsEnabled(enabled: boolean): Promise<{ locatio
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export function setAdPreferences(input: { enabled: boolean; ageRange: string | null; gender: ViewerProfile['adGender'] }) {
+  return request<{ adPersonalizationEnabled: boolean; adAgeRange: string | null; adGender: ViewerProfile['adGender'] }>('/auth/ad-preferences', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
 }
 
@@ -272,6 +285,10 @@ export interface AdvertiserCampaign {
   totalBudget: string;
   remainingBudget: string;
   targetTier: 'ALL' | 'FREE';
+  targetGender: 'ALL' | 'WOMAN' | 'MAN';
+  targetAgeRanges: string[];
+  targetCountryCodes: string[];
+  targetMalaysiaStates: string[];
   status: 'PENDING_REVIEW' | 'ACTIVE' | 'PAUSED' | 'REJECTED' | 'COMPLETED';
   impressions: number;
 }
@@ -289,7 +306,9 @@ export async function getCatalog(): Promise<DramaItem[]> {
 
 export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
   const history = await request<ContinueWatchingItem[]>('/watch-history');
-  return history.filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0);
+  return history
+    .filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0)
+    .map((item) => ({ ...item, posterUrl: normalizeUrl(item.posterUrl) ?? undefined }));
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {
@@ -470,6 +489,10 @@ export function createAdvertiserCampaign(input: {
   cpmRate: number;
   totalBudget: number;
   targetTier: 'FREE';
+  targetGender: AdvertiserCampaign['targetGender'];
+  targetAgeRanges: string[];
+  targetCountryCodes: string[];
+  targetMalaysiaStates: string[];
 }) {
   return request<{ id: string; status: AdvertiserCampaign['status'] }>('/advertiser/campaigns', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),

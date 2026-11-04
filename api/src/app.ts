@@ -192,6 +192,22 @@ app.patch('/api/v1/auth/location-sharing', requireAuthenticated, async (request,
   }
 });
 
+app.patch('/api/v1/auth/ad-preferences', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({ enabled: z.boolean(), ageRange: z.enum(['18-24', '25-34', '35-44', '45+']).nullable(), gender: z.enum(['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']).nullable() }).safeParse(request.body);
+  if (!input.success) { response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose valid optional ad preferences.' }); return; }
+  try {
+    const user = getAuthenticatedUser(request);
+    const values = input.data;
+    const { rows } = await pool.query<{ ad_personalization_enabled: boolean; ad_age_range: string | null; ad_gender: string | null }>(
+      `UPDATE users SET ad_personalization_enabled = $1, ad_age_range = CASE WHEN $1 THEN $2 ELSE NULL END,
+        ad_gender = CASE WHEN $1 THEN $3 ELSE NULL END WHERE id = $4
+       RETURNING ad_personalization_enabled, ad_age_range, ad_gender`,
+      [values.enabled, values.ageRange, values.gender, user.id],
+    );
+    response.json({ adPersonalizationEnabled: rows[0].ad_personalization_enabled, adAgeRange: rows[0].ad_age_range, adGender: rows[0].ad_gender });
+  } catch (error) { next(error); }
+});
+
 app.get('/api/v1/notifications', requireAuthenticated, async (request, response, next) => {
   try {
     const parsedLimit = z.coerce.number().int().min(1).max(100).safeParse(request.query.limit ?? 50);
@@ -819,7 +835,10 @@ app.get('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, re
       SELECT c.id, c.campaign_name AS "campaignName", c.creative_video_url AS "creativeVideoUrl",
         c.click_through_url AS "clickThroughUrl", c.cpm_rate AS "cpmRate", c.total_budget AS "totalBudget",
         c.remaining_budget AS "remainingBudget", c.target_tier AS "targetTier", c.status,
-        c.created_at AS "createdAt", COUNT(i.id)::int AS impressions
+        c.created_at AS "createdAt", c.target_gender AS "targetGender",
+        c.target_age_ranges AS "targetAgeRanges", c.target_country_codes AS "targetCountryCodes",
+        c.target_malaysia_states AS "targetMalaysiaStates",
+        COUNT(i.id) FILTER (WHERE i.qualified_at IS NOT NULL)::int AS impressions
       FROM ad_campaigns c LEFT JOIN ad_impressions i ON i.campaign_id = c.id
       WHERE c.advertiser_id = $1
       GROUP BY c.id ORDER BY c.created_at DESC
@@ -845,6 +864,10 @@ app.post('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, r
       cpmRate: z.number().positive().max(10000),
       totalBudget: z.number().positive().max(10000000),
       targetTier: z.enum(['ALL', 'FREE']),
+      targetGender: z.enum(['ALL', 'WOMAN', 'MAN']).default('ALL'),
+      targetAgeRanges: z.array(z.enum(['18-24', '25-34', '35-44', '45+'])).max(4).default([]),
+      targetCountryCodes: z.array(z.string().regex(/^[A-Z]{2}$/)).max(30).default([]),
+      targetMalaysiaStates: z.array(z.enum(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16'])).max(16).default([]),
     }).refine(value => Boolean(value.creativeKey || value.creativeVideoUrl), { message: 'Upload an MP4 creative.' }).safeParse(request.body);
     if (!input.success) {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a campaign, uploaded MP4, click URL, CPM, budget, and audience.' });
@@ -858,10 +881,10 @@ app.post('/api/v1/advertiser/campaigns', requireAuthenticated, async (request, r
       ? await verifyAdvertiserUpload(user.id, input.data.creativeKey)
       : input.data.creativeVideoUrl!;
     const { rows } = await pool.query<{ id: string; status: string }>(`
-      INSERT INTO ad_campaigns (advertiser_id, campaign_name, creative_video_url, click_through_url, cpm_rate, total_budget, remaining_budget, target_tier, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$6,$7,'PENDING_REVIEW')
+      INSERT INTO ad_campaigns (advertiser_id, campaign_name, creative_video_url, click_through_url, cpm_rate, total_budget, remaining_budget, target_tier, target_gender, target_age_ranges, target_country_codes, target_malaysia_states, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,'PENDING_REVIEW')
       RETURNING id, status
-    `, [user.id, input.data.campaignName, creativeVideoUrl, input.data.clickThroughUrl, input.data.cpmRate, input.data.totalBudget, input.data.targetTier]);
+    `, [user.id, input.data.campaignName, creativeVideoUrl, input.data.clickThroughUrl, input.data.cpmRate, input.data.totalBudget, input.data.targetTier, input.data.targetGender, input.data.targetAgeRanges, input.data.targetCountryCodes, input.data.targetMalaysiaStates]);
     response.status(201).json(rows[0]);
   } catch (error) {
     next(error);
@@ -885,14 +908,38 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
       cpm_rate: string;
     }>(`
       SELECT c.id, c.campaign_name, c.creative_video_url, c.click_through_url, c.cpm_rate::text
-      FROM ad_campaigns c
+      FROM ad_campaigns c JOIN users u ON u.id = $1
       WHERE c.status = 'ACTIVE'
         AND c.remaining_budget >= GREATEST(0.01, ROUND(c.cpm_rate / 1000, 2))
         AND c.target_tier IN ('ALL', 'FREE')
+        AND (c.target_gender = 'ALL' OR (u.ad_personalization_enabled AND u.ad_gender = c.target_gender))
+        AND (cardinality(c.target_age_ranges) = 0 OR (u.ad_personalization_enabled AND u.ad_age_range = ANY(c.target_age_ranges)))
+        AND (cardinality(c.target_country_codes) = 0 AND cardinality(c.target_malaysia_states) = 0
+          OR EXISTS (
+          SELECT 1 WHERE $2::char(2) = ANY(c.target_country_codes)
+          UNION ALL
+          SELECT 1 FROM ad_impressions ai WHERE ai.user_id = u.id AND ai.country_code = ANY(c.target_country_codes)
+            AND ai.created_at > now() - interval '90 days'
+          UNION ALL
+          SELECT 1 FROM watch_logs w JOIN viewer_location_regions r
+            ON r.latitude = ROUND(w.latitude::numeric, 2)
+            AND r.longitude = ROUND(w.longitude::numeric, 2)
+          WHERE w.user_id = u.id AND u.location_analytics_enabled
+            AND w.last_seen_at > now() - interval '90 days'
+            AND r.country_code = ANY(c.target_country_codes)
+          )
+          OR (cardinality(c.target_malaysia_states) > 0 AND EXISTS (
+            SELECT 1 FROM watch_logs w JOIN viewer_location_regions r
+              ON r.latitude = ROUND(w.latitude::numeric, 2)
+              AND r.longitude = ROUND(w.longitude::numeric, 2)
+            WHERE w.user_id = u.id AND u.location_analytics_enabled
+              AND w.last_seen_at > now() - interval '90 days'
+              AND r.country_code = 'MY' AND r.region_code::text = ANY(c.target_malaysia_states)
+          )))
       ORDER BY -LN(GREATEST(random(), 0.000001)) / GREATEST(c.cpm_rate, 0.01), c.created_at ASC
       LIMIT 1
       FOR UPDATE OF c SKIP LOCKED
-    `);
+    `, [user.id, requestCountryCode(request)]);
     const campaign = rows[0];
     if (!campaign) {
       await client.query('COMMIT');
@@ -901,19 +948,12 @@ app.get('/api/v1/ads/next', requireAuthenticated, async (request, response, next
     }
 
     const creativeVideoUrl = signPlaybackUrl(campaign.creative_video_url);
-    const cost = Math.max(0.01, Math.round(Number(campaign.cpm_rate) / 10) / 100);
     const address = request.ip ?? request.socket.remoteAddress ?? '127.0.0.1';
     const impression = await client.query<{ id: string }>(
       `INSERT INTO ad_impressions (campaign_id, user_id, device_ip, device_type, country_code)
        VALUES ($1,$2,$3,$4,$5) RETURNING id::text`,
       [campaign.id, user.id, address, requestDeviceType(request), requestCountryCode(request)],
     );
-    await client.query(`
-      UPDATE ad_campaigns
-      SET remaining_budget = GREATEST(0, remaining_budget - $1),
-          status = CASE WHEN remaining_budget <= $1 THEN 'COMPLETED' ELSE status END
-      WHERE id = $2
-    `, [cost, campaign.id]);
     await client.query('COMMIT');
     response.json({
       id: campaign.id,
@@ -943,20 +983,48 @@ app.post('/api/v1/ads/impressions/:id/progress', requireAuthenticated, async (re
     return;
   }
   try {
-    const completed = input.data.completed && input.data.positionSeconds >= input.data.durationSeconds * 0.9;
-    const result = await pool.query(`
-      UPDATE ad_impressions SET
-        watched_seconds = GREATEST(watched_seconds, $1),
-        creative_duration_seconds = GREATEST(COALESCE(creative_duration_seconds, 0), $2),
-        completed_at = CASE WHEN $3 THEN COALESCE(completed_at, now()) ELSE completed_at END,
-        device_type = COALESCE(device_type, $4)
-      WHERE id = $5::bigint AND user_id = $6
-      RETURNING id
-    `, [input.data.positionSeconds, input.data.durationSeconds, completed,
-      requestDeviceType(request, input.data.deviceType), id.data, getAuthenticatedUser(request).id]);
-    if (!result.rowCount) {
-      response.status(404).json({ error: 'AD_IMPRESSION_NOT_FOUND' });
-      return;
+    const user = getAuthenticatedUser(request);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query<{ watched_seconds: number; last_position_seconds: number; last_progress_at: Date | null; qualified_at: Date | null; campaign_id: string; cpm_rate: string }>(`
+        SELECT i.watched_seconds, i.last_position_seconds, i.last_progress_at, i.qualified_at,
+          i.campaign_id, c.cpm_rate::text
+        FROM ad_impressions i JOIN ad_campaigns c ON c.id = i.campaign_id
+        WHERE i.id = $1::bigint AND i.user_id = $2 FOR UPDATE OF i, c
+      `, [id.data, user.id]);
+      const impression = selected.rows[0];
+      if (!impression) {
+        await client.query('ROLLBACK');
+        response.status(404).json({ error: 'AD_IMPRESSION_NOT_FOUND' });
+        return;
+      }
+      const now = Date.now();
+      const elapsed = impression.last_progress_at ? (now - new Date(impression.last_progress_at).getTime()) / 1000 : 0;
+      const advance = input.data.positionSeconds - impression.last_position_seconds;
+      const watchedDelta = elapsed >= 0 && elapsed <= 15 && advance > 0 && advance <= elapsed + 2 ? Math.floor(advance) : 0;
+      const watched = impression.watched_seconds + watchedDelta;
+      const completed = input.data.completed && input.data.positionSeconds >= input.data.durationSeconds * 0.9;
+      await client.query(`UPDATE ad_impressions SET watched_seconds = $1,
+        last_position_seconds = $2, last_progress_at = now(),
+        creative_duration_seconds = GREATEST(COALESCE(creative_duration_seconds, 0), $3),
+        completed_at = CASE WHEN $4 THEN COALESCE(completed_at, now()) ELSE completed_at END,
+        device_type = COALESCE(device_type, $5) WHERE id = $6::bigint`,
+      [watched, input.data.positionSeconds, input.data.durationSeconds, completed,
+        requestDeviceType(request, input.data.deviceType), id.data]);
+      if (!impression.qualified_at && watched >= 8) {
+        const cost = Math.max(0.01, Math.round(Number(impression.cpm_rate) / 10) / 100);
+        const billed = await client.query(`UPDATE ad_campaigns SET remaining_budget = remaining_budget - $1,
+          status = CASE WHEN remaining_budget <= $1 THEN 'COMPLETED' ELSE status END
+          WHERE id = $2 AND status = 'ACTIVE' AND remaining_budget >= $1 RETURNING id`, [cost, impression.campaign_id]);
+        if (billed.rowCount) await client.query('UPDATE ad_impressions SET qualified_at = now() WHERE id = $1::bigint', [id.data]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
     response.sendStatus(204);
   } catch (error) {
@@ -972,7 +1040,7 @@ app.post('/api/v1/ads/impressions/:id/click', requireAuthenticated, async (reque
   }
   try {
     const impression = await pool.query<{ id: string }>(
-      'SELECT id::text FROM ad_impressions WHERE id = $1::bigint AND user_id = $2',
+      'SELECT id::text FROM ad_impressions WHERE id = $1::bigint AND user_id = $2 AND qualified_at IS NOT NULL',
       [id.data, getAuthenticatedUser(request).id],
     );
     if (!impression.rowCount) {

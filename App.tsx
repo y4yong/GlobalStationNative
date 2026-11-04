@@ -5,7 +5,6 @@ import Video, { ViewType } from 'react-native-video';
 import {
   ActivityIndicator,
   BackHandler,
-  SafeAreaView,
   View,
   Text as NativeText,
   TouchableOpacity,
@@ -20,13 +19,15 @@ import {
   Switch,
   Image,
   Modal,
+  PanResponder,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TextInputProps, TextProps } from 'react-native';
 import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, setAdPreferences, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
@@ -37,7 +38,7 @@ const Text = ({ style, ...props }: TextProps) => {
   const fontSize = textStyle?.fontSize;
   return <NativeText {...props} style={[style, {
     fontFamily: textStyle?.fontFamily ?? Platform.select({ android: 'sans-serif', ios: 'System' }),
-    fontSize: Math.max(typeof fontSize === 'number' ? fontSize : 16, 12),
+    fontSize: Math.max((typeof fontSize === 'number' ? fontSize : 16) - 1, 11),
   }]} />;
 };
 
@@ -47,12 +48,13 @@ const TextInput = ({ style, ...props }: TextInputProps) => {
   const minHeight = inputStyle?.minHeight;
   return <NativeTextInput {...props} style={[style, {
     fontFamily: Platform.select({ android: 'sans-serif', ios: 'System' }),
-    fontSize: Math.max(typeof fontSize === 'number' ? fontSize : 16, 16),
+    fontSize: Math.max((typeof fontSize === 'number' ? fontSize : 16) - 1, 15),
     minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 52),
   }]} />;
 };
 
 export default function App() {
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
   const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
@@ -84,24 +86,24 @@ export default function App() {
     }).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
 
-  const loadCatalog = () => {
+  const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
     setCatalogError(null);
-    Promise.all([
-      getCatalog(),
-      getContinueWatching(),
-    ])
-      .then(([items, history]) => {
-        setCatalog(items.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0));
-        setContinueWatching(history.filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0));
-      })
-      .catch(() => setCatalogError('The catalog is unavailable. Check the API connection and try again.'))
-      .finally(() => setCatalogLoading(false));
-  };
+    try {
+      const items = await getCatalog();
+      setCatalog(items.filter((item) => !!item && typeof item.id === 'string' && item.id.trim().length > 0));
+      const history = profile ? await getContinueWatching().catch(() => []) : [];
+      setContinueWatching(history.filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0));
+    } catch {
+      setCatalogError('The catalog is unavailable. Check the API connection and try again.');
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, [profile]);
 
   useEffect(() => {
-    loadCatalog();
-  }, []);
+    if (sessionReady) void loadCatalog();
+  }, [loadCatalog, sessionReady]);
 
   useEffect(() => {
     if (!adFullscreen) return;
@@ -181,7 +183,7 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar
         barStyle="dark-content"
         hidden={adFullscreen}
@@ -193,7 +195,7 @@ export default function App() {
         /* SCREEN 2: EPISODE DETAILS */
         <View style={{ flex: 1 }}>
           <View style={styles.topHeader}>
-            <TouchableOpacity onPress={() => setCurrentScreen('Tabs')}>
+            <TouchableOpacity style={styles.headerBackButton} onPress={() => setCurrentScreen('Tabs')}>
               <Text style={styles.backBtnText}>‹ Back to Home</Text>
             </TouchableOpacity>
           </View>
@@ -268,7 +270,7 @@ export default function App() {
         /* SCREEN 3: AUTHORIZED VIDEO PLAYER */
         <View style={[styles.playerContainer, adFullscreen && styles.playerFullscreen]}>
           {!adFullscreen && <View style={styles.playerTopBar}>
-            <TouchableOpacity onPress={() => setCurrentScreen('Tabs')}>
+            <TouchableOpacity style={styles.headerBackButton} onPress={() => setCurrentScreen('Tabs')}>
               <Text style={styles.backBtnText}>‹ Back</Text>
             </TouchableOpacity>
             <Text style={styles.playerScreenTitle} numberOfLines={1}>{selectedDrama.title} ({selectedDrama.rating})</Text>
@@ -293,6 +295,20 @@ export default function App() {
               <Text style={styles.watermarkText}>GLOBAL STATION</Text>
             </View>
           </View>
+          {!adFullscreen && <ScrollView style={styles.playerInfoScroll} contentContainerStyle={styles.playerInfoContent}>
+            <Text style={styles.playerVideoTitle}>{selectedDrama.title}</Text>
+            <Text style={styles.playerEpisodeTitle}>{selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)?.title ?? selectedEpisode}</Text>
+            <View style={styles.publisherRow}>
+              <View style={styles.publisherAvatar}>
+                <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'Global Station').trim().slice(0, 1).toUpperCase()}</Text>
+              </View>
+              <Text style={styles.publisherName}>{selectedDrama.creatorName || 'Global Station'}</Text>
+            </View>
+            {!!selectedDrama.description?.trim() && <>
+              <Text style={styles.playerDescriptionLabel}>About this video</Text>
+              <Text style={styles.playerDescription}>{selectedDrama.description.trim()}</Text>
+            </>}
+          </ScrollView>}
         </View>
       ) : currentScreen === 'Payout' ? (
         <PayoutScreen onBack={() => setCurrentScreen('Tabs')} />
@@ -341,12 +357,12 @@ export default function App() {
             onAddEpisode={submission => { setSelectedCreatorSubmission(submission); setCurrentScreen('AddCreatorEpisode'); }}
           />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
-          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
+          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onAdPreferences={async (preferences) => { await setAdPreferences(preferences); const updated = await getViewerProfile(); setProfile(updated); }} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
         </View>
       )}
 
       {/* ===================== BOTTOM NAVIGATION ===================== */}
-      {currentScreen === 'Tabs' && <View style={styles.bottomNav}>
+      {currentScreen === 'Tabs' && <View style={[styles.bottomNav, { height: 76 + insets.bottom, paddingBottom: insets.bottom }]}>
         {availableTabs.map((tab) => {
           const isActive = activeTab === tab.key && currentScreen === 'Tabs';
           return (
@@ -376,6 +392,8 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
   const [referralCode, setReferralCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [termsVisible, setTermsVisible] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   async function submit() {
     setBusy(true);
@@ -405,20 +423,84 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
         {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
         {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
         {!!error && <Text style={{ color: COLORS.danger, marginTop: 14 }}>{error}</Text>}
-        <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={submit}>
-          <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account...' : 'Signing in...') : registering ? 'Create account' : 'Sign in'}</Text>
+        <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={() => {
+          if (registering) {
+            setTermsAccepted(false);
+            setTermsVisible(true);
+          } else {
+            void submit();
+          }
+        }}>
+          <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account...' : 'Signing in...') : registering ? 'Review terms and create account' : 'Sign in'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={{ alignItems: 'center', padding: 16 }} onPress={() => { setRegistering(!registering); setError(''); }}>
           <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to Global Station? Create account'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      <TermsAcceptanceModal
+        visible={termsVisible}
+        title="Terms and Conditions"
+        subject="Global Station account"
+        accepted={termsAccepted}
+        onToggleAccepted={() => setTermsAccepted(value => !value)}
+        onAccept={() => { setTermsVisible(false); void submit(); }}
+        onClose={() => setTermsVisible(false)}
+        busy={busy}
+        acceptLabel="Accept and create account"
+      />
     </SafeAreaView>
+  );
+}
+
+function TermsAcceptanceModal({ visible, title, subject, accepted, onToggleAccepted, onAccept, onClose, busy, acceptLabel }: {
+  visible: boolean;
+  title: string;
+  subject: string;
+  accepted: boolean;
+  onToggleAccepted: () => void;
+  onAccept: () => void;
+  onClose: () => void;
+  busy: boolean;
+  acceptLabel: string;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.selectModalBackdrop}>
+        <View style={styles.termsModal}>
+          <Text style={styles.selectModalTitle}>{title}</Text>
+          <Text style={styles.termsDraftNotice}>Draft placeholder — replace this text with the final {subject.toLowerCase()} terms before launch.</Text>
+          <ScrollView style={styles.termsBody} contentContainerStyle={styles.termsBodyContent}>
+            <Text style={styles.termsSectionTitle}>Using Global Station</Text>
+            <Text style={styles.termsCopy}>Use your account lawfully and keep your sign-in details secure. You are responsible for activity performed through your account.</Text>
+            <Text style={styles.termsSectionTitle}>Your content and activity</Text>
+            <Text style={styles.termsCopy}>Only upload or share material you have the right to use. Global Station features and availability may change as the service is developed.</Text>
+            <Text style={styles.termsSectionTitle}>Final terms to be added</Text>
+            <Text style={styles.termsCopy}>The complete terms, privacy details, eligibility requirements, and any role-specific conditions will be provided here by the service owner.</Text>
+          </ScrollView>
+          <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: accepted }} style={styles.termsCheckRow} onPress={onToggleAccepted}>
+            <View style={[styles.termsCheckbox, accepted && styles.termsCheckboxChecked]}>
+              {accepted && <Text style={styles.termsCheckboxTick}>✓</Text>}
+            </View>
+            <Text style={styles.termsCheckText}>I have read and agree to these draft terms.</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.cyanPrimaryBtn, !accepted && styles.termsAcceptDisabled]} disabled={!accepted || busy} onPress={onAccept}>
+            <Text style={styles.cyanPrimaryBtnText}>{busy ? 'Please wait…' : acceptLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={onClose}>
+            <Text style={styles.secondaryFlowText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
 // --- TAB 1: HOME ---
 function PosterImage({ uri, title, style, badge }: { uri?: string; title: string; style: any; badge?: string }) {
-  if (!uri) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [uri]);
+
+  if (!uri || failed) {
     return (
       <View style={[style, styles.posterPlaceholder]}>
         <Text style={styles.placeholderLabel}>{badge ?? title.slice(0, 1).toUpperCase()}</Text>
@@ -426,27 +508,28 @@ function PosterImage({ uri, title, style, badge }: { uri?: string; title: string
     );
   }
 
-  return <Image source={{ uri }} style={style} resizeMode="cover" />;
+  return <Image source={{ uri }} style={style} resizeMode="cover" onError={() => setFailed(true)} />;
 }
 
 function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSelect, onPlay, onContinueWatching, onSearch, onProfile }: { dramas: DramaItem[]; continueWatching: ContinueWatchingItem[]; loading: boolean; error: string | null; onRetry: () => void; onSelect: (d: DramaItem) => void; onPlay: (d: DramaItem) => void; onContinueWatching: (item: ContinueWatchingItem) => void; onSearch: () => void; onProfile: () => void }) {
-  const [filter, setFilter] = useState('All');
-  const normalizedFilter = filter.trim().toLowerCase();
-  const filters = ['All', ...Array.from(new Set(dramas.flatMap((drama) => [
-    drama.category,
-    ...drama.genre.split(',').map((genre) => genre.trim()).filter(Boolean),
-  ]))).sort()];
-  const visibleDramas = filter === 'All'
-    ? dramas
-    : dramas.filter((d) => {
-        const categoryMatch = d.category?.toLowerCase().includes(normalizedFilter) || d.genre?.toLowerCase().includes(normalizedFilter);
-        return categoryMatch;
-      });
-  const continueWatching = visibleDramas.filter((d) => d.progress);
-  const homeDramas = visibleDramas.filter((drama) => !drama.progress && (filter !== 'All' || drama.id !== dramas[0]?.id));
-  const trendingDramas = [...homeDramas].sort((a, b) => b.trendingViews - a.trendingViews).slice(0, 10);
+  const [homeLane, setHomeLane] = useState('For You');
+  const homeLanes = ['For You', 'Movies', 'Series', 'Music Videos', 'Trending', 'New'];
+  const laneDramas = dramas.filter(drama => {
+    if (homeLane === 'Movies') return drama.contentType === 'MOVIE';
+    if (homeLane === 'Series') return drama.contentType === 'SERIES';
+    if (homeLane === 'Music Videos') return /music\s*videos?/i.test(drama.category);
+    return true;
+  });
+  const visibleDramas = homeLane === 'Trending'
+    ? [...laneDramas].sort((a, b) => b.trendingViews - a.trendingViews)
+    : homeLane === 'New'
+      ? [...laneDramas].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      : laneDramas;
+  const homeDramas = visibleDramas.filter((drama) => !drama.progress && drama.id !== visibleDramas[0]?.id);
+  const rankedDramas = [...visibleDramas].filter((drama) => !drama.progress).sort((a, b) => b.trendingViews - a.trendingViews).slice(0, 10);
   const originalSeries = homeDramas.filter((drama) => drama.contentType === 'SERIES').slice(0, 10);
   const newReleases = [...homeDramas].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 10);
+  const musicVideos = homeDramas.filter((drama) => /music\s*videos?/i.test(drama.category)).slice(0, 10);
   const renderRail = (title: string, items: DramaItem[]) => items.length > 0 && <>
     <View style={styles.sectionTitleRow}>
       <Text style={styles.sectionHeaderTitle}>{title}</Text>
@@ -462,6 +545,23 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
       ))}
     </ScrollView>
   </>;
+  const renderRankedRail = () => rankedDramas.length > 0 && <>
+    <View style={styles.sectionTitleRow}>
+      <Text style={styles.sectionHeaderTitle}>Top Videos</Text>
+    </View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
+      {rankedDramas.map((drama, index) => (
+        <TouchableOpacity key={drama.id} style={styles.popularCard} onPress={() => onSelect(drama)}>
+          <View style={styles.popularPosterFrame}>
+            <PosterImage uri={drama.posterUrl} title={drama.title} style={styles.popularPosterPlaceholder} />
+            <View style={styles.rankBadge}><Text style={styles.rankBadgeText}>#{index + 1}</Text></View>
+          </View>
+          <Text numberOfLines={2} style={styles.popularCardTitle}>{drama.title}</Text>
+          <Text style={styles.rankViews}>{drama.trendingViews.toLocaleString()} sessions</Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </>;
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
@@ -473,15 +573,10 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
         </View>
       </View>
 
-      {/* Genre Chips */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-        {filters.map((c) => (
-          <TouchableOpacity
-            key={c}
-            style={[styles.chip, filter === c && styles.chipActive]}
-            onPress={() => setFilter(c)}
-          >
-            <Text style={[styles.chipText, filter === c && styles.chipTextActive]}>{c}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.homeLaneRow}>
+        {homeLanes.map(lane => (
+          <TouchableOpacity key={lane} accessibilityRole="button" accessibilityState={{ selected: homeLane === lane }} style={[styles.homeLaneChip, homeLane === lane && styles.homeLaneChipActive]} onPress={() => setHomeLane(lane)}>
+            <Text style={[styles.homeLaneText, homeLane === lane && styles.homeLaneTextActive]}>{lane}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -495,14 +590,14 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
       )}
 
       {/* Hero Banner */}
-      {filter === 'All' && dramas[0] && <View style={styles.heroCard}>
-        <PosterImage uri={dramas[0].posterHorizontalUrl ?? dramas[0].posterUrl} title={dramas[0].title} style={styles.heroPosterImage} />
+      {visibleDramas[0] && <View style={styles.heroCard}>
+        <PosterImage uri={visibleDramas[0].posterHorizontalUrl ?? visibleDramas[0].posterUrl} title={visibleDramas[0].title} style={styles.heroPosterImage} />
         <View style={styles.heroGradient}>
-          <Text style={styles.heroDramaTitle}>{dramas[0].title}</Text>
-          <Text style={styles.heroSub}>{dramas[0].genre} • {dramas[0].rating}</Text>
+          <Text style={styles.heroDramaTitle}>{visibleDramas[0].title}</Text>
+          <Text style={styles.heroSub}>{visibleDramas[0].genre} • {visibleDramas[0].rating}</Text>
 
           <View style={styles.heroBtnRow}>
-            <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(dramas[0])}>
+            <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(visibleDramas[0])}>
               <Text style={styles.cyanActionBtnText}>▶ Watch Episode 1</Text>
             </TouchableOpacity>
           </View>
@@ -529,9 +624,10 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
         </>
       )}
 
-      {renderRail('Trending Now', trendingDramas)}
+      {renderRankedRail()}
+      {renderRail('Music Videos', musicVideos)}
       {renderRail('Original Series', originalSeries)}
-      {renderRail('New Releases', newReleases)}
+      {renderRail('Fresh Drops', newReleases)}
       {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
@@ -848,7 +944,7 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
         const spendPercent = budget > 0 ? Math.min(100, spent / budget * 100) : 0;
         const estimatedRemaining = Number(campaign.cpmRate) > 0 ? Math.floor(remainingBudget / Number(campaign.cpmRate) * 1000) : 0;
         return <View key={campaign.id} style={styles.advertiserCampaignCard}>
-          <View style={styles.advertiserCampaignHeading}><View style={{ flex: 1 }}><Text style={styles.campaignTitle}>{campaign.campaignName}</Text><Text style={styles.campaignSub}>Audience · {campaign.targetTier === 'ALL' ? 'All ad-supported viewers (VIP excluded)' : 'Free members'}</Text>{campaign.status === 'PENDING_REVIEW' && <Text style={styles.campaignSub}>Awaiting administrator review</Text>}{campaign.status === 'PAUSED' && <Text style={styles.campaignSub}>Paused by an administrator</Text>}{campaign.status === 'REJECTED' && <Text style={styles.campaignSub}>Not approved</Text>}</View><Text style={campaign.status === 'ACTIVE' ? styles.advertiserStatusActive : styles.advertiserStatusPaused}>{campaign.status === 'PENDING_REVIEW' ? 'PENDING REVIEW' : campaign.status}</Text></View>
+          <View style={styles.advertiserCampaignHeading}><View style={{ flex: 1 }}><Text style={styles.campaignTitle}>{campaign.campaignName}</Text><Text style={styles.campaignSub}>Audience · {campaign.targetTier === 'ALL' ? 'All ad-supported viewers (VIP excluded)' : 'Free members'}{campaign.targetGender !== 'ALL' ? ` · ${campaign.targetGender === 'WOMAN' ? 'Women' : 'Men'}` : ''}{campaign.targetAgeRanges.length ? ` · ages ${campaign.targetAgeRanges.join(', ')}` : ''}{campaign.targetMalaysiaStates.length ? ` · ${campaign.targetMalaysiaStates.map(code => MALAYSIA_AD_STATES.find(state => state[0] === code)?.[1] ?? code).join(', ')}` : ''}{campaign.targetCountryCodes.length ? ` · ${campaign.targetCountryCodes.join(', ')}` : ''}</Text>{campaign.status === 'PENDING_REVIEW' && <Text style={styles.campaignSub}>Awaiting administrator review</Text>}{campaign.status === 'PAUSED' && <Text style={styles.campaignSub}>Paused by an administrator</Text>}{campaign.status === 'REJECTED' && <Text style={styles.campaignSub}>Not approved</Text>}</View><Text style={campaign.status === 'ACTIVE' ? styles.advertiserStatusActive : styles.advertiserStatusPaused}>{campaign.status === 'PENDING_REVIEW' ? 'PENDING REVIEW' : campaign.status}</Text></View>
           <View style={styles.advertiserBudgetHeading}><Text style={styles.advertiserBudgetMain}>RM {remainingBudget.toFixed(2)} <Text style={styles.advertiserBudgetMinor}>remaining</Text></Text><Text style={styles.advertiserBudgetTotal}>of RM {budget.toFixed(2)}</Text></View>
           <View style={styles.advertiserBudgetTrack}><View style={[styles.advertiserBudgetFill, { width: `${spendPercent}%` }]} /></View>
           <View style={styles.advertiserCampaignStats}>
@@ -864,13 +960,18 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView({ profile, onSupport, onEngagement, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onEngagement: () => void; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
+function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onEngagement: () => void; onAdPreferences: (preferences: { enabled: boolean; ageRange: string | null; gender: ViewerProfile['adGender'] }) => Promise<void>; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
   const roles = Array.from(new Set(profile.roles?.length ? profile.roles : [profile.role]));
   const missingRoles = profile.role === 'ADMIN' ? [] : (['CREATOR', 'ADVERTISER'] as const).filter(role => !roles.includes(role));
   const [message, setMessage] = useState('');
   const [busyPlan, setBusyPlan] = useState<'VIP_MONTHLY' | 'VIP_YEARLY' | null>(null);
   const [busyUpgrade, setBusyUpgrade] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
   const [roleToConfirm, setRoleToConfirm] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
+  const [roleTermsAccepted, setRoleTermsAccepted] = useState(false);
+  const [adPersonalization, setAdPersonalization] = useState(profile.adPersonalizationEnabled);
+  const [adAgeRange, setAdAgeRange] = useState(profile.adAgeRange ?? '');
+  const [adGender, setAdGender] = useState(profile.adGender ?? '');
+  const [savingAdPreferences, setSavingAdPreferences] = useState(false);
 
   async function upgradeRole(role: 'CREATOR' | 'ADVERTISER') {
     setBusyUpgrade(role);
@@ -952,16 +1053,36 @@ function ProfileTabView({ profile, onSupport, onEngagement, onRefreshProfile, on
         </View>
       </View>
 
+      <View style={styles.profileSection}>
+        <Text style={styles.profileSectionTitle}>Ad personalization</Text>
+        <Text style={styles.engagementActionSub}>Optional. Share broad age and gender details for relevant ads. Location targeting uses your approximate country when available.</Text>
+        <View style={styles.engagementPreferenceRow}>
+          <Text style={styles.profileActionTitle}>Allow age and gender targeting</Text>
+          <Switch accessibilityLabel="Allow age and gender ad personalization" value={adPersonalization} onValueChange={setAdPersonalization} trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={adPersonalization ? COLORS.cyan : '#cbd5e1'} />
+        </View>
+        {adPersonalization && <>
+          <SelectField label="Age range" value={adAgeRange} options={['18-24', '25-34', '35-44', '45+']} onChange={setAdAgeRange} />
+          <SelectField label="Gender" value={adGender} options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']} onChange={value => setAdGender(value as NonNullable<ViewerProfile['adGender']>)} />
+        </>}
+        <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={savingAdPreferences} onPress={async () => {
+          if (adPersonalization && (!adAgeRange || !adGender)) { setMessage('Choose an age range and gender, or turn personalization off.'); return; }
+          setSavingAdPreferences(true);
+          try { await onAdPreferences({ enabled: adPersonalization, ageRange: adAgeRange || null, gender: adGender ? adGender as NonNullable<ViewerProfile['adGender']> : null }); setMessage('Ad preferences saved.'); }
+          catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to save ad preferences.'); }
+          finally { setSavingAdPreferences(false); }
+        }}><Text style={styles.profileRefreshText}>{savingAdPreferences ? 'Saving...' : 'Save ad preferences'}</Text></TouchableOpacity>
+      </View>
+
       {missingRoles.length > 0 && (
         <View style={styles.profileSection}>
           <Text style={styles.profileSectionTitle}>More ways to use Global Station</Text>
           <View style={styles.profileRoleGrid}>
-            {missingRoles.includes('CREATOR') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleToConfirm('CREATOR'); }}>
+            {missingRoles.includes('CREATOR') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleTermsAccepted(false); setRoleToConfirm('CREATOR'); }}>
               <Text style={styles.profileRoleIcon}>✦</Text>
               <Text style={styles.profileRoleTitle}>Be a Creator</Text>
               <Text style={styles.profileRoleArrow}>›</Text>
             </TouchableOpacity>}
-            {missingRoles.includes('ADVERTISER') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleToConfirm('ADVERTISER'); }}>
+            {missingRoles.includes('ADVERTISER') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleTermsAccepted(false); setRoleToConfirm('ADVERTISER'); }}>
               <Text style={styles.profileRoleIcon}>↗</Text>
               <Text style={styles.profileRoleTitle}>Be an Advertiser</Text>
               <Text style={styles.profileRoleArrow}>›</Text>
@@ -1011,13 +1132,35 @@ function ProfileTabView({ profile, onSupport, onEngagement, onRefreshProfile, on
       </View>
       <Modal visible={roleToConfirm !== null} transparent animationType="fade" onRequestClose={() => setRoleToConfirm(null)}>
         <View style={styles.selectModalBackdrop}>
-          <View style={styles.selectModal}>
-            <Text style={styles.selectModalTitle}>{roleToConfirm === 'CREATOR' ? 'Be a Creator?' : 'Be an Advertiser?'}</Text>
-            <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busyUpgrade !== null} onPress={() => roleToConfirm && upgradeRole(roleToConfirm)}>
-              <Text style={styles.cyanPrimaryBtnText}>{busyUpgrade ? 'Updating account...' : 'Confirm'}</Text>
+          <View style={styles.termsModal}>
+            <Text style={styles.selectModalTitle}>Become a {roleToConfirm === 'CREATOR' ? 'Creator' : 'Advertiser'}</Text>
+            <Text style={styles.termsDraftNotice}>Draft placeholder — replace this text with the final role-specific terms before launch.</Text>
+            <ScrollView style={styles.termsBody} contentContainerStyle={styles.termsBodyContent}>
+              {roleToConfirm === 'CREATOR' ? <>
+                <Text style={styles.termsSectionTitle}>Creator responsibilities</Text>
+                <Text style={styles.termsCopy}>Only submit content you own or are authorized to distribute. Provide accurate information and comply with applicable laws and platform content standards.</Text>
+                <Text style={styles.termsSectionTitle}>Publishing and payments</Text>
+                <Text style={styles.termsCopy}>Submissions may be reviewed before publication. Any revenue share, payout, licensing, and removal rules will be set out in the final Creator terms.</Text>
+              </> : <>
+                <Text style={styles.termsSectionTitle}>Advertiser responsibilities</Text>
+                <Text style={styles.termsCopy}>Only submit advertising material you are authorized to use. Make sure your campaign details, claims, destination links, and budget are accurate.</Text>
+                <Text style={styles.termsSectionTitle}>Campaign review and billing</Text>
+                <Text style={styles.termsCopy}>Campaigns may be reviewed before they run. Final rules for billing, delivery, refunds, and prohibited advertising will be provided in the Advertiser terms.</Text>
+              </>}
+              <Text style={styles.termsSectionTitle}>Final terms to be added</Text>
+              <Text style={styles.termsCopy}>These are temporary examples, not the final legal terms. The complete role-specific conditions will be provided here by the service owner.</Text>
+            </ScrollView>
+            <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: roleTermsAccepted }} style={styles.termsCheckRow} onPress={() => setRoleTermsAccepted(value => !value)}>
+              <View style={[styles.termsCheckbox, roleTermsAccepted && styles.termsCheckboxChecked]}>
+                {roleTermsAccepted && <Text style={styles.termsCheckboxTick}>✓</Text>}
+              </View>
+              <Text style={styles.termsCheckText}>I have read and agree to these draft terms.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.cyanPrimaryBtn, !roleTermsAccepted && styles.termsAcceptDisabled]} disabled={!roleTermsAccepted || busyUpgrade !== null} onPress={() => roleToConfirm && upgradeRole(roleToConfirm)}>
+              <Text style={styles.cyanPrimaryBtnText}>{busyUpgrade ? 'Updating account...' : 'Accept and continue'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busyUpgrade !== null} onPress={() => setRoleToConfirm(null)}>
-              <Text style={styles.secondaryFlowText}>Not now</Text>
+              <Text style={styles.secondaryFlowText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1293,7 +1436,8 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
   function reportAdProgress(position: number, duration: number, completed = false) {
     if (!ad || duration <= 0 || (completed && completionReported.current)) return;
     const wholeSecond = Math.floor(position);
-    if (!completed && wholeSecond - lastReportedAdSecond.current < 5) return;
+    const firstQualificationReport = wholeSecond >= 8 && lastReportedAdSecond.current < 8;
+    if (!completed && wholeSecond - lastReportedAdSecond.current < 5 && !firstQualificationReport) return;
     if (completed) completionReported.current = true;
     const previousSecond = lastReportedAdSecond.current;
     lastReportedAdSecond.current = wholeSecond;
@@ -1365,7 +1509,7 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
     <Text style={styles.adLoadingText}>Loading ad…</Text>
   </View>;
   const adProgress = adDuration > 0 ? Math.min(100, adCurrentTime / adDuration * 100) : 0;
-  const secondsUntilSkip = Math.max(0, 5 - Math.floor(adCurrentTime));
+  const secondsUntilSkip = Math.max(0, 8 - Math.floor(adCurrentTime));
   const formatAdTime = (seconds: number) => {
     const wholeSeconds = Math.max(0, Math.floor(seconds));
     return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`;
@@ -1417,7 +1561,7 @@ function AdBreak({ fullscreen, onComplete, onToggleFullscreen }: { fullscreen: b
             <Text style={styles.adTimeText}>Ad · {formatAdTime(adCurrentTime)} / {formatAdTime(adDuration)}</Text>
           </View>
           <View style={styles.adActionRow}>
-            {ad.clickThroughUrl && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Visit Page" style={styles.adVisitButton} onPress={openAdvertiserPage}><Text style={styles.adVisitButtonText}>Visit Page</Text></TouchableOpacity>}
+            {ad.clickThroughUrl && adCurrentTime >= 8 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Visit Page" style={styles.adVisitButton} onPress={openAdvertiserPage}><Text style={styles.adVisitButtonText}>Visit Page</Text></TouchableOpacity>}
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={!adHasStarted ? 'Skip ad unavailable until playback starts' : secondsUntilSkip > 0 ? `Skip ad in ${secondsUntilSkip} seconds` : 'Skip ad'} style={[styles.skipBtn, styles.adSkipButton]} disabled={!adHasStarted || secondsUntilSkip > 0} onPress={() => onCompleteRef.current()}><Text style={styles.skipBtnText}>{!adHasStarted ? 'Starting…' : secondsUntilSkip > 0 ? `Skip in ${secondsUntilSkip}s` : 'Skip ad'}</Text></TouchableOpacity>
           </View>
         </View>
@@ -1818,12 +1962,25 @@ function EditCreatorContentScreen({ submission, onBack, onSaved }: {
   </View>;
 }
 
+const MALAYSIA_AD_STATES = [
+  ['01', 'Johor'], ['02', 'Kedah'], ['03', 'Kelantan'], ['04', 'Melaka'], ['05', 'Negeri Sembilan'],
+  ['06', 'Pahang'], ['07', 'Penang'], ['08', 'Perak'], ['09', 'Perlis'], ['10', 'Selangor'],
+  ['11', 'Terengganu'], ['12', 'Sabah'], ['13', 'Sarawak'], ['14', 'Kuala Lumpur'], ['15', 'Labuan'], ['16', 'Putrajaya'],
+] as const;
+const OTHER_AD_LOCATIONS = [['SG', 'Singapore'], ['ID', 'Indonesia'], ['TH', 'Thailand'], ['PH', 'Philippines'], ['US', 'United States'], ['GB', 'United Kingdom'], ['AU', 'Australia']] as const;
+const AD_AGE_RANGES = ['18-24', '25-34', '35-44', '45+'] as const;
+
 function CampaignScreen({ onBack }: { onBack: () => void }) {
   const [campaignName, setCampaignName] = useState('');
   const [clickThroughUrl, setClickThroughUrl] = useState('');
   const [cpmRate, setCpmRate] = useState(10);
   const [totalBudget, setTotalBudget] = useState(500);
   const targetTier: 'FREE' = 'FREE';
+  const [targetGender, setTargetGender] = useState<'ALL' | 'WOMAN' | 'MAN'>('ALL');
+  const [targetAgeRanges, setTargetAgeRanges] = useState<string[]>([]);
+  const [targetCountryCodes, setTargetCountryCodes] = useState<string[]>([]);
+  const [targetMalaysiaStates, setTargetMalaysiaStates] = useState<string[]>([]);
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [creative, setCreative] = useState<{ path: string; name: string; size: number } | null>(null);
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState(0);
@@ -1863,7 +2020,7 @@ function CampaignScreen({ onBack }: { onBack: () => void }) {
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(creative.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, Math.round(written / Math.max(1, total) * 100))));
       if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Creative upload failed (${result.info().status}).`);
-      await createAdvertiserCampaign({ campaignName: campaignName.trim(), creativeKey: upload.objectKey, clickThroughUrl: destination.toString(), cpmRate, totalBudget, targetTier });
+      await createAdvertiserCampaign({ campaignName: campaignName.trim(), creativeKey: upload.objectKey, clickThroughUrl: destination.toString(), cpmRate, totalBudget, targetTier, targetGender, targetAgeRanges, targetCountryCodes, targetMalaysiaStates });
       Alert.alert('Campaign submitted', `Estimated delivery: ${Math.floor(totalBudget / cpmRate * 1000).toLocaleString()} impressions. It will reach viewers after an administrator activates it.`);
       onBack();
     } catch (error) {
@@ -1874,12 +2031,41 @@ function CampaignScreen({ onBack }: { onBack: () => void }) {
   }
 
   const estimatedImpressions = Math.floor(totalBudget / cpmRate * 1000);
+  const selectedLocationLabels = [
+    ...targetMalaysiaStates.map(code => MALAYSIA_AD_STATES.find(state => state[0] === code)?.[1] ?? code),
+    ...targetCountryCodes.map(code => OTHER_AD_LOCATIONS.find(location => location[0] === code)?.[1] ?? code),
+  ];
+  const locationSummary = selectedLocationLabels.length > 2
+    ? `${selectedLocationLabels.slice(0, 2).join(', ')} + ${selectedLocationLabels.length - 2} more`
+    : selectedLocationLabels.join(', ') || 'All locations';
   return <View style={styles.flowScreen}><FlowHeader title="New campaign" onBack={onBack} /><ScrollView contentContainerStyle={styles.flowContent}>
     <Text style={styles.screenMainTitle}>Plan your campaign</Text>
     <View style={styles.flowField}><Text style={styles.flowLabel}>Campaign name</Text><TextInput value={campaignName} onChangeText={setCampaignName} editable={!busy} maxLength={150} placeholder="Enter a campaign name" placeholderTextColor={COLORS.textDim} style={styles.flowInput} /></View>
     <View style={styles.flowField}><Text style={styles.flowLabel}>Video creative</Text><TouchableOpacity style={styles.creativePicker} disabled={busy} onPress={chooseCreative}><Text style={styles.creativePickerIcon}>▶</Text><View style={{ flex: 1 }}><Text style={styles.creativePickerTitle}>{creative?.name ?? 'Choose MP4 video'}</Text><Text style={styles.creativePickerSub}>{creative ? `${(creative.size / 1048576).toFixed(1)} MB` : 'Upload a video ad from this device'}</Text></View><Text style={styles.creativePickerAction}>{creative ? 'Change' : 'Browse'}</Text></TouchableOpacity></View>
     <View style={styles.flowField}><Text style={styles.flowLabel}>Destination link</Text><TextInput value={clickThroughUrl} onChangeText={setClickThroughUrl} editable={!busy} autoCapitalize="none" keyboardType="url" placeholder="https://your-site.com" placeholderTextColor={COLORS.textDim} style={styles.flowInput} /></View>
-    <View style={styles.campaignChoiceSection}><Text style={styles.flowLabel}>Audience</Text><Text style={styles.campaignPickerHint}>Free members only. VIP membership is ad-free.</Text></View>
+    <View style={styles.campaignChoiceSection}>
+      <Text style={styles.flowLabel}>Audience</Text><Text style={styles.campaignPickerHint}>Free members only. Age and gender filters match viewers who opted into ad personalization. Malaysian state filters use location-sharing data.</Text>
+      <Text style={[styles.campaignPickerHint, { marginTop: 10 }]}>Gender</Text><View style={styles.campaignChoiceRow}>{([['ALL', 'Any'], ['WOMAN', 'Women'], ['MAN', 'Men']] as const).map(([value, label]) => <TouchableOpacity key={value} disabled={busy} style={[styles.campaignChoice, targetGender === value && styles.campaignChoiceActive]} onPress={() => setTargetGender(value)}><Text style={[styles.campaignChoiceLabel, targetGender === value && styles.campaignChoiceLabelActive]}>{label}</Text></TouchableOpacity>)}</View>
+      <Text style={[styles.campaignPickerHint, { marginTop: 14 }]}>Age range · {targetAgeRanges.length ? `${targetAgeRanges[0]} to ${targetAgeRanges[targetAgeRanges.length - 1]}` : 'Any age'}</Text>
+      <CampaignAgeSlider ranges={targetAgeRanges} onChange={setTargetAgeRanges} />
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Location targeting: ${targetMalaysiaStates.length + targetCountryCodes.length ? `${targetMalaysiaStates.length + targetCountryCodes.length} selected` : 'All locations'}`} style={[styles.selectField, { marginTop: 14 }]} onPress={() => setLocationPickerOpen(true)}>
+        <View style={{ flex: 1 }}><Text style={styles.flowLabel}>Location</Text><Text style={styles.selectValue} numberOfLines={1}>{locationSummary}</Text></View>
+        <Text style={styles.selectChevron}>⌄</Text>
+      </TouchableOpacity>
+      <Modal visible={locationPickerOpen} transparent animationType="fade" onRequestClose={() => setLocationPickerOpen(false)}>
+        <View style={styles.selectModalBackdrop}><View style={styles.selectModal}>
+          <Text style={styles.selectModalTitle}>Target locations</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.selectOption} onPress={() => { setTargetMalaysiaStates([]); setTargetCountryCodes([]); }}><Text style={[styles.selectOptionText, !targetMalaysiaStates.length && !targetCountryCodes.length && styles.selectOptionTextSelected]}>All locations</Text>{!targetMalaysiaStates.length && !targetCountryCodes.length && <Text style={styles.selectCheck}>✓</Text>}</TouchableOpacity>
+          <ScrollView style={{ maxHeight: 430 }}>
+            <Text style={[styles.flowLabel, { marginTop: 14 }]}>MALAYSIA · STATES & TERRITORIES</Text>
+            {MALAYSIA_AD_STATES.map(([code, label]) => { const selected = targetMalaysiaStates.includes(code); return <TouchableOpacity key={code} accessibilityRole="checkbox" accessibilityState={{ checked: selected }} style={styles.selectOption} onPress={() => setTargetMalaysiaStates(current => selected ? current.filter(item => item !== code) : [...current, code])}><Text style={[styles.selectOptionText, selected && styles.selectOptionTextSelected]}>{label}</Text>{selected && <Text style={styles.selectCheck}>✓</Text>}</TouchableOpacity>; })}
+            <Text style={[styles.flowLabel, { marginTop: 14 }]}>OTHER COUNTRIES</Text>
+            {OTHER_AD_LOCATIONS.map(([code, label]) => { const selected = targetCountryCodes.includes(code); return <TouchableOpacity key={code} accessibilityRole="checkbox" accessibilityState={{ checked: selected }} style={styles.selectOption} onPress={() => setTargetCountryCodes(current => selected ? current.filter(item => item !== code) : [...current, code])}><Text style={[styles.selectOptionText, selected && styles.selectOptionTextSelected]}>{label}</Text>{selected && <Text style={styles.selectCheck}>✓</Text>}</TouchableOpacity>; })}
+          </ScrollView>
+          <TouchableOpacity style={styles.cyanPrimaryBtn} onPress={() => setLocationPickerOpen(false)}><Text style={styles.cyanPrimaryBtnText}>Done</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
+    </View>
     <View style={styles.campaignChoiceSection}><Text style={styles.flowLabel}>CPM · cost per 1,000 impressions</Text><View style={styles.campaignChoiceRow}>{[5, 10, 20, 30].map(rate => <TouchableOpacity key={rate} disabled={busy} style={[styles.campaignChoice, cpmRate === rate && styles.campaignChoiceActive]} onPress={() => setCpmRate(rate)}><Text style={[styles.campaignChoiceLabel, cpmRate === rate && styles.campaignChoiceLabelActive]}>RM {rate}</Text></TouchableOpacity>)}</View></View>
     <View style={styles.campaignChoiceSection}><View style={styles.campaignBudgetHeader}><Text style={styles.flowLabel}>Total budget</Text><Text style={styles.campaignBudgetAmount}>RM {totalBudget.toLocaleString()}</Text></View><View style={styles.campaignChoiceRow}>{[100, 250, 500, 1000, 2500].map(amount => <TouchableOpacity key={amount} disabled={busy} style={[styles.campaignChoice, totalBudget === amount && styles.campaignChoiceActive]} onPress={() => setTotalBudget(amount)}><Text style={[styles.campaignChoiceLabel, totalBudget === amount && styles.campaignChoiceLabelActive]}>{amount >= 1000 ? `RM ${(amount / 1000).toFixed(amount % 1000 ? 1 : 0)}k` : `RM ${amount}`}</Text></TouchableOpacity>)}</View><View style={styles.budgetStepper}><Text style={styles.campaignPickerHint}>Adjust in RM 50 steps</Text><View style={styles.stepperControls}><TouchableOpacity accessibilityLabel="Decrease budget by RM 50" disabled={busy || totalBudget <= 50} style={styles.stepperButton} onPress={() => setTotalBudget(value => Math.max(50, value - 50))}><Text style={styles.stepperButtonText}>−</Text></TouchableOpacity><Text style={styles.stepperValue}>RM {totalBudget.toLocaleString()}</Text><TouchableOpacity accessibilityLabel="Increase budget by RM 50" disabled={busy} style={styles.stepperButton} onPress={() => setTotalBudget(value => Math.min(10000, value + 50))}><Text style={styles.stepperButtonText}>+</Text></TouchableOpacity></View></View></View>
     <View style={styles.reachEstimate}><Text style={styles.reachEstimateLabel}>Estimated ad impressions</Text><Text style={styles.reachEstimateValue}>{estimatedImpressions.toLocaleString()}</Text><Text style={styles.reachEstimateFootnote}>RM {totalBudget.toLocaleString()} budget ÷ RM {cpmRate} CPM · estimate, not guaranteed unique people</Text></View>
@@ -1888,6 +2074,51 @@ function CampaignScreen({ onBack }: { onBack: () => void }) {
     {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
     <TouchableOpacity style={styles.cyanPrimaryBtn} disabled={busy} onPress={submit}><Text style={styles.cyanPrimaryBtnText}>{busy ? 'Uploading and submitting…' : 'Submit campaign for review'}</Text></TouchableOpacity>
   </ScrollView></View>;
+}
+
+function CampaignAgeSlider({ ranges, onChange }: { ranges: string[]; onChange: (ranges: string[]) => void }) {
+  const startIndex = ranges.length ? Math.max(0, AD_AGE_RANGES.indexOf(ranges[0] as typeof AD_AGE_RANGES[number])) : 0;
+  const endIndex = ranges.length ? Math.max(startIndex, AD_AGE_RANGES.indexOf(ranges[ranges.length - 1] as typeof AD_AGE_RANGES[number])) : AD_AGE_RANGES.length - 1;
+  const [trackWidth, setTrackWidth] = useState(0);
+  const current = useRef({ low: startIndex, high: endIndex, width: trackWidth, onChange });
+  current.current = { low: startIndex, high: endIndex, width: trackWidth, onChange };
+  const dragStart = useRef({ low: startIndex, high: endIndex });
+
+  function createHandle(which: 'low' | 'high') {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => { dragStart.current[which] = current.current[which]; },
+      onPanResponderMove: (_event, gesture) => {
+        const state = current.current;
+        const travel = Math.max(1, state.width - 24);
+        const initialPosition = dragStart.current[which] / (AD_AGE_RANGES.length - 1) * travel;
+        const index = Math.max(0, Math.min(AD_AGE_RANGES.length - 1, Math.round((initialPosition + gesture.dx) / travel * (AD_AGE_RANGES.length - 1))));
+        const low = which === 'low' ? Math.min(index, state.high) : state.low;
+        const high = which === 'high' ? Math.max(index, state.low) : state.high;
+        current.current = { ...state, low, high };
+        state.onChange(AD_AGE_RANGES.slice(low, high + 1));
+      },
+    });
+  }
+
+  const lowResponder = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  const highResponder = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (!lowResponder.current) lowResponder.current = createHandle('low');
+  if (!highResponder.current) highResponder.current = createHandle('high');
+  const travel = Math.max(0, trackWidth - 24);
+  const left = startIndex / (AD_AGE_RANGES.length - 1) * travel;
+  const right = endIndex / (AD_AGE_RANGES.length - 1) * travel;
+
+  return <View style={styles.ageSliderWrap}>
+    <View style={styles.ageSliderTrack} onLayout={event => setTrackWidth(event.nativeEvent.layout.width)}>
+      <View style={styles.ageSliderRail} />
+      <View style={[styles.ageSliderFill, { left: left + 12, width: Math.max(0, right - left) }]} />
+      <View accessibilityRole="adjustable" accessibilityLabel="Minimum age range" accessibilityValue={{ min: 0, max: AD_AGE_RANGES.length - 1, now: startIndex, text: AD_AGE_RANGES[startIndex] }} style={[styles.ageSliderThumb, { left }]} {...lowResponder.current.panHandlers} />
+      <View accessibilityRole="adjustable" accessibilityLabel="Maximum age range" accessibilityValue={{ min: 0, max: AD_AGE_RANGES.length - 1, now: endIndex, text: AD_AGE_RANGES[endIndex] }} style={[styles.ageSliderThumb, { left: right }]} {...highResponder.current.panHandlers} />
+    </View>
+    <View style={styles.ageSliderLabels}>{AD_AGE_RANGES.map(range => <Text key={range} style={styles.ageSliderLabel}>{range}</Text>)}</View>
+  </View>;
 }
 
 function SupportScreen({ onBack }: { onBack: () => void }) {
@@ -1955,6 +2186,18 @@ const styles = StyleSheet.create({
   selectChevron: { color: COLORS.cyan, fontSize: 18, fontWeight: '800' },
   selectModalBackdrop: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.72)' },
   selectModal: { maxHeight: '80%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16 },
+  termsModal: { width: '100%', maxHeight: '90%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, padding: 18 },
+  termsDraftNotice: { color: COLORS.gold, backgroundColor: '#fff3d9', borderRadius: 8, padding: 10, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  termsBody: { flexGrow: 0, maxHeight: 300, marginTop: 12 },
+  termsBodyContent: { paddingBottom: 8 },
+  termsSectionTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', marginTop: 12 },
+  termsCopy: { color: COLORS.textMuted, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  termsCheckRow: { flexDirection: 'row', alignItems: 'center', minHeight: 52, gap: 11, marginTop: 8, paddingVertical: 5 },
+  termsCheckbox: { width: 24, height: 24, borderWidth: 2, borderColor: COLORS.textDim, borderRadius: 5, alignItems: 'center', justifyContent: 'center' },
+  termsCheckboxChecked: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
+  termsCheckboxTick: { color: '#ffffff', fontSize: 16, fontWeight: '900', lineHeight: 18 },
+  termsCheckText: { flex: 1, color: COLORS.textLight, fontSize: 12, lineHeight: 17 },
+  termsAcceptDisabled: { opacity: 0.45 },
   selectModalTitle: { color: COLORS.textLight, fontSize: 16, fontWeight: '800', marginBottom: 8 },
   selectOption: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder, paddingHorizontal: 8 },
   selectOptionText: { color: COLORS.textLight, fontSize: 13 },
@@ -1967,7 +2210,8 @@ const styles = StyleSheet.create({
   chatMessage: { color: COLORS.textLight, fontSize: 12, marginTop: 8, lineHeight: 18 },
   secondaryFlowBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 10, borderRadius: 7, borderWidth: 1, borderColor: COLORS.cardBorder },
   secondaryFlowText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
-  topHeader: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
+  topHeader: { minHeight: 56, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 6, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
+  headerBackButton: { minHeight: 44, justifyContent: 'center', paddingRight: 12 },
   backBtnText: { color: COLORS.cyan, fontSize: 16, fontWeight: '700' },
   detailsContent: { paddingHorizontal: 18, paddingBottom: 104 },
 
@@ -1976,15 +2220,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 18,
-    paddingTop: 8,
+    paddingTop: 12,
     paddingBottom: 4,
   },
   brandTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textLight, letterSpacing: 1.1 },
   authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 21, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
   headerRightIcons: { flexDirection: 'row', gap: 8 },
-  iconTxt: { color: COLORS.textLight, fontSize: 20, paddingHorizontal: 7, paddingVertical: 5 },
+  iconTxt: { color: COLORS.textLight, fontSize: 20, minWidth: 44, minHeight: 44, textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 7, paddingVertical: 9 },
 
-  chipRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  homeLaneRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
+  homeLaneChip: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 19, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
+  homeLaneChipActive: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
+  homeLaneText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700' },
+  homeLaneTextActive: { color: '#ffffff', fontWeight: '900' },
+  rankBadge: { position: 'absolute', left: 7, top: 7, minWidth: 34, height: 30, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, borderRadius: 9, backgroundColor: COLORS.gold },
+  rankBadgeText: { color: '#17130b', fontSize: 15, fontWeight: '900' },
+  rankViews: { color: COLORS.cyan, fontSize: 10, fontWeight: '800', marginTop: 3 },
+
   chip: {
     paddingHorizontal: 16,
     paddingVertical: 7,
@@ -2090,8 +2342,8 @@ const styles = StyleSheet.create({
   cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8 },
   metaSmallText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
 
-  popularCard: { width: 132, minHeight: 190, borderRadius: 12, overflow: 'hidden' },
-  popularPosterFrame: { width: 132, height: 154, borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: COLORS.cardBg },
+  popularCard: { width: 120, minHeight: 232, borderRadius: 12, overflow: 'hidden' },
+  popularPosterFrame: { width: 120, height: 180, borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: COLORS.cardBg },
   popularPosterPlaceholder: {
     width: '100%',
     height: '100%',
@@ -2137,6 +2389,16 @@ const styles = StyleSheet.create({
   playerFullscreen: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1000 },
   playerTopBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 16 },
   playerScreenTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginLeft: 14, flex: 1 },
+  playerInfoScroll: { flex: 1, backgroundColor: COLORS.bg },
+  playerInfoContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 },
+  playerVideoTitle: { color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
+  playerEpisodeTitle: { color: COLORS.textMuted, fontSize: 14, fontWeight: '600', marginTop: 5 },
+  publisherRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderColor: COLORS.cardBorder },
+  publisherAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cyan },
+  publisherAvatarText: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },
+  publisherName: { color: COLORS.textLight, fontSize: 14, fontWeight: '800', marginLeft: 11 },
+  playerDescriptionLabel: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', marginTop: 17 },
+  playerDescription: { color: COLORS.textMuted, fontSize: 13, lineHeight: 20, marginTop: 6 },
   videoStage: {
     height: 320,
     backgroundColor: COLORS.bg,
@@ -2386,6 +2648,13 @@ const styles = StyleSheet.create({
   campaignChoiceActive: { borderColor: COLORS.cyan, backgroundColor: COLORS.cyanSoft },
   campaignChoiceLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   campaignChoiceLabelActive: { color: COLORS.cyan },
+  ageSliderWrap: { marginTop: 8 },
+  ageSliderTrack: { height: 28, justifyContent: 'center', position: 'relative' },
+  ageSliderRail: { position: 'absolute', height: 4, top: 12, left: 12, right: 12, borderRadius: 2, backgroundColor: COLORS.cardBorder },
+  ageSliderFill: { position: 'absolute', height: 4, top: 12, borderRadius: 2, backgroundColor: COLORS.cyan },
+  ageSliderThumb: { position: 'absolute', top: 2, width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: COLORS.cyan, backgroundColor: COLORS.bg, elevation: 2 },
+  ageSliderLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  ageSliderLabel: { color: COLORS.textDim, fontSize: 8 },
   campaignBudgetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   campaignBudgetAmount: { color: COLORS.textLight, fontSize: 15, fontWeight: '900' },
   budgetStepper: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
@@ -2445,6 +2714,7 @@ const styles = StyleSheet.create({
   profileMetaValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', marginTop: 4 },
   profileVipValue: { color: COLORS.gold },
   profileSection: { marginTop: 25 },
+  engagementPreferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 10 },
   profileSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 },
   profileSectionTitle: { color: COLORS.textLight, fontSize: 17, fontWeight: '800', letterSpacing: 0.1 },
   profileActiveLabel: { color: COLORS.green, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },

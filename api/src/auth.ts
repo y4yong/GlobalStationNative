@@ -14,7 +14,7 @@ export const registerSchema = z.object({
 });
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
-export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean }
+export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean; adPersonalizationEnabled: boolean; adAgeRange: string | null; adGender: string | null }
 interface AuthenticatedRequest extends Request { authenticatedUser?: AuthenticatedUser }
 
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
@@ -110,10 +110,14 @@ export async function requireAuthenticated(request: Request, response: Response,
       roles: UserRole[];
       is_vip: boolean;
       location_analytics_enabled: boolean;
+      ad_personalization_enabled: boolean;
+      ad_age_range: string | null;
+      ad_gender: string | null;
       status: string;
     }>(`SELECT id, name, email, role, status,
         ARRAY(SELECT role FROM user_roles WHERE user_id = users.id) AS roles,
         location_analytics_enabled,
+        ad_personalization_enabled, ad_age_range, ad_gender,
         (is_vip OR EXISTS (
           SELECT 1 FROM subscriptions s
           WHERE s.user_id = users.id AND s.status = 'ACTIVE'
@@ -133,6 +137,9 @@ export async function requireAuthenticated(request: Request, response: Response,
       roles: Array.from(new Set([user.role, ...user.roles])),
       isVip: user.is_vip,
       locationAnalyticsEnabled: user.location_analytics_enabled,
+      adPersonalizationEnabled: user.ad_personalization_enabled,
+      adAgeRange: user.ad_age_range,
+      adGender: user.ad_gender,
     };
     next();
   } catch (error) {

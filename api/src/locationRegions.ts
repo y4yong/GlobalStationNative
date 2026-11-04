@@ -1,6 +1,12 @@
 import { pool } from './db.js';
 
-type RegionCacheRow = { region_name: string | null; country_name: string | null };
+type RegionCacheRow = { region_name: string | null; country_name: string | null; country_code: string | null; region_code: string | null };
+const malaysiaStateCodes: Record<string, string> = {
+  johor: '01', kedah: '02', kelantan: '03', melaka: '04', malacca: '04',
+  'negeri sembilan': '05', pahang: '06', 'pulau pinang': '07', penang: '07',
+  perak: '08', perlis: '09', selangor: '10', terengganu: '11', sabah: '12',
+  sarawak: '13', 'kuala lumpur': '14', labuan: '15', putrajaya: '16',
+};
 
 // Nominatim requires no more than one request per second. Keep lookups serialized
 // and cache each rounded coordinate cell so playback heartbeats never geocode repeatedly.
@@ -42,8 +48,11 @@ export function lookupViewerRegion(latitude: number, longitude: number) {
       const address = result.address ?? {};
       const region = address.state || address.region || address.province || address.state_district || null;
       const country = address.country || null;
-      await pool.query(`UPDATE viewer_location_regions SET region_name = $3, country_name = $4
-        WHERE latitude = $1 AND longitude = $2`, [lat, lon, region, country]);
+      const countryCode = address.country_code?.toUpperCase() || null;
+      const subdivision = address['ISO3166-2-lvl4']?.match(/^MY-(\d{2})$/i)?.[1];
+      const regionCode = countryCode === 'MY' ? (subdivision ?? malaysiaStateCodes[(region ?? '').toLowerCase()] ?? null) : null;
+      await pool.query(`UPDATE viewer_location_regions SET region_name = $3, country_name = $4, country_code = $5, region_code = $6
+        WHERE latitude = $1 AND longitude = $2`, [lat, lon, region, country, countryCode, regionCode]);
     } catch (error) {
       console.warn('Viewer area lookup failed:', error instanceof Error ? error.message : 'unknown error');
     } finally {

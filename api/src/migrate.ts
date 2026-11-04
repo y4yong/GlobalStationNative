@@ -70,5 +70,14 @@ await applySql(await readFile(path.resolve(viewerLocationPath), 'utf8'));
 const viewerLocationRegionsPath = fileURLToPath(new URL('../sql/014_viewer_location_regions.sql', import.meta.url));
 await applySql(await readFile(path.resolve(viewerLocationRegionsPath), 'utf8'));
 
+const schemaReconciliationPath = fileURLToPath(new URL('../sql/015_schema_reconciliation.sql', import.meta.url));
+await applySql(await readFile(path.resolve(schemaReconciliationPath), 'utf8'));
+
+const adTargetingPath = fileURLToPath(new URL('../sql/016_ad_targeting_and_qualified_impressions.sql', import.meta.url));
+await applySql(await readFile(path.resolve(adTargetingPath), 'utf8'));
+
+const malaysiaStateTargetingPath = fileURLToPath(new URL('../sql/017_malaysia_state_ad_targeting.sql', import.meta.url));
+await applySql(await readFile(path.resolve(malaysiaStateTargetingPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

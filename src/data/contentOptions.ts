@@ -27,6 +27,7 @@ export const CONTENT_GENRES = [
 export const CONTENT_CATEGORIES = [
   'Documentary',
   'Film',
+  'Music Video',
   'Malay Drama',
   'Original Series',
   'Korean Drama',

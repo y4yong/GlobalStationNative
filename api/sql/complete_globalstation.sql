@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL DEFAULT 'VIEWER' CHECK (role IN ('VIEWER', 'CREATOR', 'ADVERTISER', 'ADMIN')),
   is_vip BOOLEAN NOT NULL DEFAULT FALSE,
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED')),
+  location_analytics_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  ad_personalization_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  ad_age_range VARCHAR(10) CHECK (ad_age_range IS NULL OR ad_age_range IN ('18-24', '25-34', '35-44', '45+')),
+  ad_gender VARCHAR(20) CHECK (ad_gender IS NULL OR ad_gender IN ('WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -51,6 +55,7 @@ CREATE TABLE IF NOT EXISTS content (
   is_featured BOOLEAN NOT NULL DEFAULT FALSE,
   is_exclusive_vip BOOLEAN NOT NULL DEFAULT FALSE,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  poster_horizontal_url TEXT,
   status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED')),
   origin geography(Point, 4326),
   available_regions geography(MultiPolygon, 4326),
@@ -90,6 +95,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   plan_code VARCHAR(30) NOT NULL CHECK (plan_code IN ('FREE', 'VIP_MONTHLY', 'VIP_YEARLY')),
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PAST_DUE', 'CANCELLED', 'EXPIRED')),
+  end_reason VARCHAR(30),
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   renews_at TIMESTAMPTZ,
   cancelled_at TIMESTAMPTZ
@@ -104,6 +110,7 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
   amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
   currency CHAR(3) NOT NULL DEFAULT 'MYR',
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SUCCEEDED', 'FAILED', 'REFUNDED')),
+  failure_reason VARCHAR(30),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -139,7 +146,12 @@ CREATE TABLE IF NOT EXISTS ad_campaigns (
   remaining_budget NUMERIC(12,2) NOT NULL CHECK (remaining_budget >= 0),
   target_tier VARCHAR(10) NOT NULL DEFAULT 'FREE' CHECK (target_tier IN ('ALL', 'FREE')),
   target_regions geography(MultiPolygon, 4326),
+  target_gender VARCHAR(20) NOT NULL DEFAULT 'ALL' CHECK (target_gender IN ('ALL', 'WOMAN', 'MAN')),
+  target_age_ranges TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (target_age_ranges <@ ARRAY['18-24', '25-34', '35-44', '45+']::TEXT[]),
+  target_country_codes CHAR(2)[] NOT NULL DEFAULT ARRAY[]::CHAR(2)[],
+  target_malaysia_states TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (target_malaysia_states <@ ARRAY['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16']::TEXT[]),
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'ACTIVE', 'PAUSED', 'REJECTED', 'COMPLETED')),
+  click_through_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE ad_campaigns ADD COLUMN IF NOT EXISTS click_through_url TEXT;
@@ -151,7 +163,25 @@ CREATE TABLE IF NOT EXISTS ad_impressions (
   content_id UUID REFERENCES content(id) ON DELETE SET NULL,
   device_ip INET NOT NULL,
   watched_seconds INTEGER NOT NULL DEFAULT 0,
+  device_type VARCHAR(20),
+  country_code CHAR(2),
+  creative_duration_seconds INTEGER,
+  completed_at TIMESTAMPTZ,
+  qualified_at TIMESTAMPTZ,
+  last_position_seconds INTEGER NOT NULL DEFAULT 0,
+  last_progress_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS viewer_location_regions (
+  latitude NUMERIC(5,2) NOT NULL,
+  longitude NUMERIC(6,2) NOT NULL,
+  region_name TEXT,
+  country_name TEXT,
+  looked_up_at TIMESTAMPTZ,
+  country_code CHAR(2),
+  region_code CHAR(2),
+  PRIMARY KEY (latitude, longitude)
 );
 
 CREATE TABLE IF NOT EXISTS watch_logs (
@@ -159,6 +189,13 @@ CREATE TABLE IF NOT EXISTS watch_logs (
   user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   episode_id UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
   watch_seconds INTEGER NOT NULL CHECK (watch_seconds >= 0),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_position_seconds INTEGER NOT NULL DEFAULT 0,
+  max_position_seconds INTEGER NOT NULL DEFAULT 0,
+  duration_seconds INTEGER,
+  completed_at TIMESTAMPTZ,
+  device_type VARCHAR(20),
+  country_code CHAR(2),
   device_ip INET NOT NULL,
   session_uid VARCHAR(100) NOT NULL,
   latitude DOUBLE PRECISION,
@@ -185,6 +222,9 @@ CREATE TABLE IF NOT EXISTS referrals (
   referred_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   referral_code VARCHAR(30) NOT NULL,
   reward_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  code_id UUID,
+  attribution_type VARCHAR(20) NOT NULL DEFAULT 'REFERRAL',
+  qualified_at TIMESTAMPTZ,
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'QUALIFIED', 'PAID')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(referrer_id, referred_id)
@@ -252,4 +292,4 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO admin_audit_logs (admin_user_id, action, entity_type, entity_id, metadata)
 VALUES ('00000000-0000-0000-0000-000000000001', 'SEED_INITIALIZED', 'SYSTEM', 'globalstation', '{"source":"complete_globalstation.sql"}')
 ON CONFLICT DO NOTHING;
-  
+
