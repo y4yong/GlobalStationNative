@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { contentCategories, contentGenreSchema } from './contentOptions.js';
+import { contentCategories, contentGenreSchema, mediaTrackLanguages } from './contentOptions.js';
 import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerRequestSchema, requireAuthenticated, upgradeRole } from './auth.js';
 import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
@@ -12,7 +12,8 @@ import { listContinueWatching, listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
 import { lookupViewerRegion } from './locationRegions.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
-import { createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
+import { createCoinCheckout, createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
+import { coinWallet, purchaseEpisodeWithCoins } from './coins.js';
 import {
   createIndustryConnection,
   createMarketplaceInterest,
@@ -388,6 +389,41 @@ app.get('/api/v1/auth/me', requireAuthenticated, (request, response) => {
   response.json(getAuthenticatedUser(request));
 });
 
+app.get('/api/v1/coins/wallet', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await coinWallet(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/coins/checkout', requireAuthenticated, async (request, response, next) => {
+  try {
+    const input = z.object({ pack: z.enum(['STARTER', 'POPULAR', 'VALUE']) }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a supported coin pack.' });
+      return;
+    }
+    response.status(201).json(await createCoinCheckout(getAuthenticatedUser(request), input.data.pack));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/coins/episodes/:id/purchase', requireAuthenticated, async (request, response, next) => {
+  try {
+    const episodeId = z.string().uuid().safeParse(request.params.id);
+    if (!episodeId.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid episode ID is required.' });
+      return;
+    }
+    const purchase = await purchaseEpisodeWithCoins(getAuthenticatedUser(request).id, episodeId.data);
+    response.json(purchase);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch('/api/v1/auth/location-sharing', requireAuthenticated, async (request, response, next) => {
   const input = z.object({ enabled: z.boolean() }).safeParse(request.body);
   if (!input.success) {
@@ -679,6 +715,8 @@ app.post('/api/v1/creator/submissions/:id/episodes', requireAuthenticated, async
       title: z.string().trim().min(1).max(255),
       durationSeconds: z.number().int().positive(),
       mediaKey: z.string().min(1),
+      subtitleLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
+      dubbingLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
     }).safeParse(request.body);
     if (!id.success || !input.success) {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid episode title, duration, and uploaded MP4.' });
@@ -702,8 +740,8 @@ app.post('/api/v1/creator/submissions/:id/episodes', requireAuthenticated, async
       );
       const episodeNumber = numberResult.rows[0].nextEpisodeNumber;
       await client.query(
-        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,$2,$3,$4,$5,false)',
-        [id.data, episodeNumber, input.data.title, input.data.durationSeconds, mediaReference],
+        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview, subtitle_languages, dubbing_languages) VALUES ($1,$2,$3,$4,$5,false,$6,$7)',
+        [id.data, episodeNumber, input.data.title, input.data.durationSeconds, mediaReference, input.data.subtitleLanguages, input.data.dubbingLanguages],
       );
       await client.query("UPDATE content SET status = 'IN_REVIEW', updated_at = now() WHERE id = $1", [id.data]);
       await client.query('COMMIT');
@@ -756,6 +794,8 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     durationSeconds: z.number().int().positive(),
     mediaKey: z.string().min(1),
     isExclusiveVip: z.boolean().default(false),
+    subtitleLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
+    dubbingLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
   }).safeParse(request.body);
   if (!input.success) {
     response.status(400).json({ error: 'INVALID_REQUEST', message: 'Complete content details and an uploaded MP4 are required.' });
@@ -775,8 +815,8 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
         [input.data.title, input.data.contentType, input.data.description, posterUrl, posterHorizontalUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
       );
       await client.query(
-        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,1,$2,$3,$4,true)',
-        [content.rows[0].id, input.data.episodeTitle, input.data.durationSeconds, mediaReference],
+        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview, subtitle_languages, dubbing_languages) VALUES ($1,1,$2,$3,$4,true,$5,$6)',
+        [content.rows[0].id, input.data.episodeTitle, input.data.durationSeconds, mediaReference, input.data.subtitleLanguages, input.data.dubbingLanguages],
       );
       await client.query('COMMIT');
       response.status(201).json({ id: content.rows[0].id, status: 'IN_REVIEW' });
@@ -805,13 +845,18 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
       is_free_preview: boolean;
       is_exclusive_vip: boolean;
       has_active_vip: boolean;
+      has_coin_unlock: boolean;
     }>(`
       SELECT e.hls_manifest_url, e.is_free_preview, c.is_exclusive_vip,
         (u.is_vip OR EXISTS (
           SELECT 1 FROM subscriptions s
           WHERE s.user_id = u.id AND s.status = 'ACTIVE'
             AND (s.renews_at IS NULL OR s.renews_at > now())
-        )) AS has_active_vip
+        )) AS has_active_vip,
+        EXISTS (
+          SELECT 1 FROM episode_coin_purchases cp
+          WHERE cp.user_id = u.id AND cp.episode_id = e.id
+        ) AS has_coin_unlock
       FROM episodes e
       JOIN content c ON c.id = e.content_id
       JOIN users u ON u.id = $2
@@ -822,8 +867,10 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
       response.status(404).json({ error: 'EPISODE_NOT_FOUND' });
       return;
     }
-    if ((episode.is_exclusive_vip || !episode.is_free_preview) && !episode.has_active_vip) {
-      response.status(403).json({ error: 'VIP_REQUIRED', message: 'An active VIP membership is required to play this episode.' });
+    if ((episode.is_exclusive_vip || !episode.is_free_preview) && !episode.has_active_vip && !episode.has_coin_unlock) {
+      response.status(403).json({ error: 'VIP_REQUIRED', message: episode.is_exclusive_vip
+        ? 'An active VIP membership is required to play this exclusive episode.'
+        : 'Unlock this episode with coins or an active VIP membership.' });
       return;
     }
 
@@ -975,11 +1022,11 @@ app.post('/api/v1/payments/stripe/webhook', async (request, response, next) => {
 });
 
 app.get('/api/v1/payments/stripe/return', (_request, response) => {
-  response.type('text/plain').send('Payment status is verified by Stripe. You may return to CINEVA and refresh membership status.');
+  response.type('text/plain').send('Payment status is verified by Stripe. Return to CINEVA and refresh your coin balance or membership status.');
 });
 
 app.get('/api/v1/payments/stripe/cancel', (_request, response) => {
-  response.type('text/plain').send('Checkout was cancelled. No membership change was made.');
+  response.type('text/plain').send('Checkout was cancelled. No coins or membership were added.');
 });
 
 app.get('/api/v1/support/tickets', requireAuthenticated, async (request, response, next) => {

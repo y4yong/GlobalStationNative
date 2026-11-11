@@ -28,7 +28,7 @@ import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, setAdPreferences, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview, createIndustryConnection, createMarketplaceInterest, createMarketplaceProject, generateStoryIdea, getIndustryConnections, getIndustryPeople, getIndustryProfile, getMarketplaceInterests, getMarketplaceProjects, respondToIndustryConnection, saveIndustryProfile, updateMarketplaceInterest, IndustryConnection, IndustryPerson, IndustryProfile, MarketplaceInterest, MarketplaceProject, MarketplaceNeed } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, CoinWallet, createAdvertiserCampaign, createAdvertiserUpload, createCoinCheckout, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCoinWallet, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, purchaseEpisodeWithCoins, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview, createIndustryConnection, createMarketplaceInterest, createMarketplaceProject, generateStoryIdea, getIndustryConnections, getIndustryPeople, getIndustryProfile, getMarketplaceInterests, getMarketplaceProjects, respondToIndustryConnection, saveIndustryProfile, updateMarketplaceInterest, IndustryConnection, IndustryPerson, IndustryProfile, MarketplaceInterest, MarketplaceProject, MarketplaceNeed } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
@@ -55,6 +55,7 @@ const TextInput = ({ style, ...props }: TextInputProps) => {
     minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 52),
   }]} />;
 };
+const MEDIA_TRACK_LANGUAGES = ['Malay', 'English', 'Mandarin', 'Tamil', 'Indonesian', 'Japanese', 'Korean', 'Thai'];
 
 export default function App() {
   const insets = useSafeAreaInsets();
@@ -83,6 +84,8 @@ export default function App() {
   const activeAdBreak = useRef<'pre-roll' | PlaybackAdBreak | null>(null);
   const playedAdBreaks = useRef(new Set<PlaybackAdBreak>());
   const [profile, setProfile] = useState<ViewerProfile | null>(null);
+  const [coinWallet, setCoinWallet] = useState<CoinWallet | null>(null);
+  const [coinWalletError, setCoinWalletError] = useState('');
   const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
@@ -95,6 +98,24 @@ export default function App() {
       }
     }).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!profile) {
+      setCoinWallet(null);
+      setCoinWalletError('');
+      return;
+    }
+    let active = true;
+    getCoinWallet().then(wallet => {
+      if (active) {
+        setCoinWallet(wallet);
+        setCoinWalletError('');
+      }
+    }).catch(error => {
+      if (active) setCoinWalletError(error instanceof Error ? error.message : 'Unable to load coins.');
+    });
+    return () => { active = false; };
+  }, [profile?.id]);
 
   const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
@@ -157,14 +178,7 @@ export default function App() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const startPlayback = (drama: DramaItem, epTitle?: string, resumeAtSeconds = 0, resumeEpisodeId?: string) => {
-    const episode = resumeEpisodeId
-      ? drama.episodes.find((item) => item.id === resumeEpisodeId) ?? drama.episodes[0]
-      : drama.episodes.find((item) => item.title === epTitle) ?? drama.episodes[0];
-    if (!episode) {
-      Alert.alert('Playback unavailable', 'This title does not have an episode with a media source yet.');
-      return;
-    }
+  const openEpisodePlayback = (drama: DramaItem, episode: DramaItem['episodes'][number], resumeAtSeconds: number) => {
     setSelectedDrama(drama);
     setResumeAtSeconds(resumeAtSeconds);
     setResumeEpisodeId(episode.id);
@@ -174,6 +188,49 @@ export default function App() {
     activeAdBreak.current = 'pre-roll';
     setAdBreakPhase('pre-roll');
     setCurrentScreen('Player');
+  };
+
+  const startPlayback = (drama: DramaItem, epTitle?: string, resumeAtSeconds = 0, resumeEpisodeId?: string) => {
+    const episode = resumeEpisodeId
+      ? drama.episodes.find((item) => item.id === resumeEpisodeId) ?? drama.episodes[0]
+      : drama.episodes.find((item) => item.title === epTitle) ?? drama.episodes[0];
+    if (!episode) {
+      Alert.alert('Playback unavailable', 'This title does not have an episode with a media source yet.');
+      return;
+    }
+    if (episode.requiresVip && !profile.isVip && !coinWallet?.unlockedEpisodeIds.includes(episode.id)) {
+      if (!episode.canBuyWithCoins) {
+        Alert.alert('VIP episode', 'An active VIP membership is required to watch this exclusive episode.');
+        return;
+      }
+      const price = episode.coinPrice ?? 10;
+      Alert.alert('Unlock episode', `Use ${price} coins to unlock this episode permanently?`, [
+        { text: 'Not now', style: 'cancel' },
+        { text: `Unlock · ${price} coins`, onPress: () => {
+          void (async () => {
+            try {
+              const wallet = coinWallet ?? await getCoinWallet();
+              if (wallet.balance < price) {
+                setCoinWallet(wallet);
+                Alert.alert('Not enough coins', 'Top up your balance to unlock this episode.', [
+                  { text: 'Not now', style: 'cancel' },
+                  { text: 'Top up coins', onPress: () => { setCurrentScreen('Tabs'); setActiveTab('Profile'); } },
+                ]);
+                return;
+              }
+              const purchase = await purchaseEpisodeWithCoins(episode.id);
+              setCoinWallet({ ...wallet, balance: purchase.balance, unlockedEpisodeIds: Array.from(new Set([...wallet.unlockedEpisodeIds, episode.id])) });
+              setProfile(current => current ? { ...current, coinBalance: purchase.balance } : current);
+              openEpisodePlayback(drama, episode, resumeAtSeconds);
+            } catch (error) {
+              Alert.alert('Unable to unlock episode', error instanceof Error ? error.message : 'Please try again.');
+            }
+          })();
+        } },
+      ]);
+      return;
+    }
+    openEpisodePlayback(drama, episode, resumeAtSeconds);
   };
 
   const handlePlaybackProgress = (currentTime: number, duration: number) => {
@@ -269,15 +326,16 @@ export default function App() {
                   {selectedDrama.contentType === 'SERIES' && <Text style={styles.episodeNumber}>EPISODE {index + 1}</Text>}
                   <View style={styles.episodeTitleRow}>
                     <Text style={styles.episodeTitle}>{ep.title}</Text>
-                    {ep.requiresVip && <Text style={styles.vipTitleLabel}>VIP</Text>}
+                    {ep.requiresVip && <Text style={styles.vipTitleLabel}>{coinWallet?.unlockedEpisodeIds.includes(ep.id) ? 'UNLOCKED' : ep.canBuyWithCoins && !profile.isVip ? `${ep.coinPrice ?? 10} COINS` : 'VIP'}</Text>}
                   </View>
                   <Text style={styles.episodeMeta}>{ep.duration} • {ep.rating}</Text>
+                  {!!(ep.subtitleLanguages?.length || ep.dubbingLanguages?.length) && <Text style={styles.episodeMeta}>Subtitles: {ep.subtitleLanguages?.join(', ') || '—'} · Dubs: {ep.dubbingLanguages?.join(', ') || '—'}</Text>}
                 </View>
                 <TouchableOpacity
                   style={styles.cyanSmallBtn}
                   onPress={() => startPlayback(selectedDrama, ep.title)}
                 >
-                  <Text style={styles.cyanSmallBtnText}>Play</Text>
+                  <Text style={styles.cyanSmallBtnText}>{ep.canBuyWithCoins && !profile.isVip && !coinWallet?.unlockedEpisodeIds.includes(ep.id) ? `${ep.coinPrice ?? 10} coins` : 'Play'}</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -403,7 +461,7 @@ export default function App() {
             onAddEpisode={submission => { setSelectedCreatorSubmission(submission); setCurrentScreen('AddCreatorEpisode'); }}
           />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
-          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onAdPreferences={async (preferences) => { await setAdPreferences(preferences); const updated = await getViewerProfile(); setProfile(updated); }} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
+          {activeTab === 'Profile' && <ProfileTabView profile={profile} coinWallet={coinWallet} coinWalletError={coinWalletError} onRefreshCoins={async () => { const wallet = await getCoinWallet(); setCoinWallet(wallet); setCoinWalletError(''); setProfile(current => current ? { ...current, coinBalance: wallet.balance } : current); }} onCoinCheckout={async (pack) => { const checkout = await createCoinCheckout(pack); await Linking.openURL(checkout.paymentUrl); }} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
         </View>
       )}
 
@@ -1311,7 +1369,7 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onEngagement: () => void; onAdPreferences: (preferences: { enabled: boolean; ageRange: string | null; gender: ViewerProfile['adGender'] }) => Promise<void>; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
+function ProfileTabView({ profile, coinWallet, coinWalletError, onRefreshCoins, onCoinCheckout, onSupport, onEngagement, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; coinWallet: CoinWallet | null; coinWalletError: string; onRefreshCoins: () => Promise<void>; onCoinCheckout: (pack: CoinWallet['packs'][number]['code']) => Promise<void>; onSupport: () => void; onEngagement: () => void; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
   const roles = Array.from(new Set(profile.roles?.length ? profile.roles : [profile.role]));
   const missingRoles = profile.role === 'ADMIN' ? [] : (['CREATOR', 'ADVERTISER'] as const).filter(role => !roles.includes(role));
   const [message, setMessage] = useState('');
@@ -1319,11 +1377,21 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
   const [busyUpgrade, setBusyUpgrade] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
   const [roleToConfirm, setRoleToConfirm] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
   const [roleTermsAccepted, setRoleTermsAccepted] = useState(false);
-  const [adPersonalization, setAdPersonalization] = useState(profile.adPersonalizationEnabled);
-  const [adAgeRange, setAdAgeRange] = useState(profile.adAgeRange ?? '');
-  const [adGender, setAdGender] = useState(profile.adGender ?? '');
-  const [savingAdPreferences, setSavingAdPreferences] = useState(false);
+  const [busyCoinPack, setBusyCoinPack] = useState<CoinWallet['packs'][number]['code'] | null>(null);
+  const [coinModalVisible, setCoinModalVisible] = useState(false);
+  const [coinMessage, setCoinMessage] = useState('');
 
+  async function buyCoins(pack: CoinWallet['packs'][number]['code']) {
+    setBusyCoinPack(pack);
+    setCoinMessage('');
+    try {
+      await onCoinCheckout(pack);
+    } catch (error) {
+      setCoinMessage(error instanceof Error ? error.message : 'Unable to open checkout.');
+    } finally {
+      setBusyCoinPack(null);
+    }
+  }
   async function upgradeRole(role: 'CREATOR' | 'ADVERTISER') {
     setBusyUpgrade(role);
     setMessage('');
@@ -1401,27 +1469,15 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
             <Text style={styles.profileMetaLabel}>ACCOUNT TYPE</Text>
             <Text style={styles.profileMetaValue} numberOfLines={2}>{accountType}</Text>
           </View>
+          <View style={styles.profileMetaColumn}>
+            <Text style={styles.profileMetaLabel}>COINS</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${profile.coinBalance} coins. View coin packs`} style={styles.profileCoinBalanceButton} onPress={() => { setCoinMessage(''); setCoinModalVisible(true); }}>
+              <CoinMark />
+              <Text style={styles.profileCoinBalanceValue}>{profile.coinBalance.toLocaleString()}</Text>
+              <Text style={styles.profileCoinBalanceArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
-
-      <View style={styles.profileSection}>
-        <Text style={styles.profileSectionTitle}>Ad personalization</Text>
-        <Text style={styles.engagementActionSub}>Optional. Share broad age and gender details for relevant ads. Location targeting uses your approximate country when available.</Text>
-        <View style={styles.engagementPreferenceRow}>
-          <Text style={styles.profileActionTitle}>Allow age and gender targeting</Text>
-          <Switch accessibilityLabel="Allow age and gender ad personalization" value={adPersonalization} onValueChange={setAdPersonalization} trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={adPersonalization ? COLORS.cyan : '#cbd5e1'} />
-        </View>
-        {adPersonalization && <>
-          <SelectField label="Age range" value={adAgeRange} options={['18-24', '25-34', '35-44', '45+']} onChange={setAdAgeRange} />
-          <SelectField label="Gender" value={adGender} options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']} onChange={value => setAdGender(value as NonNullable<ViewerProfile['adGender']>)} />
-        </>}
-        <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={savingAdPreferences} onPress={async () => {
-          if (adPersonalization && (!adAgeRange || !adGender)) { setMessage('Choose an age range and gender, or turn personalization off.'); return; }
-          setSavingAdPreferences(true);
-          try { await onAdPreferences({ enabled: adPersonalization, ageRange: adAgeRange || null, gender: adGender ? adGender as NonNullable<ViewerProfile['adGender']> : null }); setMessage('Ad preferences saved.'); }
-          catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to save ad preferences.'); }
-          finally { setSavingAdPreferences(false); }
-        }}><Text style={styles.profileRefreshText}>{savingAdPreferences ? 'Saving...' : 'Save ad preferences'}</Text></TouchableOpacity>
       </View>
 
       {missingRoles.length > 0 && (
@@ -1482,6 +1538,35 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
           <Text style={styles.profileRoleArrow}>›</Text>
         </TouchableOpacity>
       </View>
+      <Modal visible={coinModalVisible} transparent animationType="fade" onRequestClose={() => setCoinModalVisible(false)}>
+        <View style={styles.selectModalBackdrop}>
+          <View style={styles.coinModal}>
+            <View style={styles.coinModalHeading}>
+              <Text style={styles.selectModalTitle}>Coins</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close coin packs" onPress={() => setCoinModalVisible(false)}>
+                <Text style={styles.profileRoleArrow}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.coinModalBalanceRow}><CoinMark size="large" /><Text style={styles.coinModalBalance}>{profile.coinBalance.toLocaleString()} coins</Text></View>
+            {coinWalletError ? <Text style={styles.profileNotice}>{coinWalletError}</Text> : null}
+            {coinWallet?.packs.map(pack => (
+              <TouchableOpacity key={pack.code} accessibilityRole="button" style={styles.coinPackRow} disabled={busyCoinPack !== null} onPress={() => buyCoins(pack.code)}>
+                <View style={styles.coinPackInfo}><CoinMark /><Text style={styles.coinPackAmount}>{pack.label}</Text></View>
+                <Text style={styles.coinPackPrice}>{busyCoinPack === pack.code ? 'Opening…' : `RM ${pack.amount}`}</Text>
+              </TouchableOpacity>
+            ))}
+            {!coinWallet && !coinWalletError && <Text style={styles.engagementActionSub}>Loading…</Text>}
+            {!!coinMessage && <Text style={styles.profileNotice}>{coinMessage}</Text>}
+            <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={busyCoinPack !== null} onPress={async () => {
+              setCoinMessage('');
+              try { await onRefreshCoins(); }
+              catch (error) { setCoinMessage(error instanceof Error ? error.message : 'Unable to refresh balance.'); }
+            }}>
+              <Text style={styles.profileRefreshText}>Refresh balance</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={roleToConfirm !== null} transparent animationType="fade" onRequestClose={() => setRoleToConfirm(null)}>
         <View style={styles.selectModalBackdrop}>
           <View style={styles.termsModal}>
@@ -1518,6 +1603,17 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
         </View>
       </Modal>
     </ScrollView>
+  );
+}
+
+function CoinMark({ size = 'small' }: { size?: 'small' | 'large' }) {
+  return (
+    <View style={[styles.coinMark, size === 'large' && styles.coinMarkLarge]}>
+      <View style={[styles.coinMarkInner, size === 'large' && styles.coinMarkInnerLarge]}>
+        <Text style={[styles.coinMarkLetter, size === 'large' && styles.coinMarkLetterLarge]}>C</Text>
+      </View>
+      <View style={styles.coinMarkShine} />
+    </View>
   );
 }
 
@@ -1956,7 +2052,7 @@ function SelectField({ label, value, options, onChange }: { label: string; value
   </View>;
 }
 
-function MultiSelectField({ label, values, options, onChange }: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+function MultiSelectField({ label, values, options, onChange, hint = 'Choose one or more genres.' }: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void; hint?: string }) {
   const [visible, setVisible] = useState(false);
   const toggleOption = (option: string) => {
     onChange(values.includes(option) ? values.filter((value) => value !== option) : [...values, option]);
@@ -1976,7 +2072,7 @@ function MultiSelectField({ label, values, options, onChange }: { label: string;
       </Text>
       <Text style={styles.selectChevron}>⌄</Text>
     </TouchableOpacity>
-    <Text style={styles.multiSelectHint}>Choose one or more genres.</Text>
+    <Text style={styles.multiSelectHint}>{hint}</Text>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
       <View style={styles.selectModalBackdrop}>
         <View style={styles.selectModal}>
@@ -2050,6 +2146,8 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
   const [durationSeconds, setDurationSeconds] = useState('');
   const [contentType, setContentType] = useState<'MOVIE' | 'SERIES'>('SERIES');
   const [isExclusiveVip, setIsExclusiveVip] = useState(false);
+  const [subtitleLanguages, setSubtitleLanguages] = useState<string[]>([]);
+  const [dubbingLanguages, setDubbingLanguages] = useState<string[]>([]);
   const [video, setVideo] = useState<{ path: string; name: string; size: number } | null>(null);
   const [poster, setPoster] = useState<CreatorPosterFile | null>(null);
   const [posterHorizontal, setPosterHorizontal] = useState<CreatorPosterFile | null>(null);
@@ -2105,7 +2203,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 20 + Math.round(written / Math.max(1, total) * 80))));
       if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
-      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip });
+      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip, subtitleLanguages, dubbingLanguages });
       Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
       onBack();
     } catch (error) {
@@ -2129,6 +2227,9 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
     <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
     <View style={styles.flowField}><Text style={styles.flowLabel}>{contentType === 'SERIES' ? 'Episode duration (120–300 seconds)' : 'Duration (seconds)'}</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} style={styles.flowInput} keyboardType="number-pad" /></View>
+    <Text style={styles.screenSubTitle}>Select languages included in the release. These are saved as metadata; separate subtitle/audio track files are not uploaded or playable yet.</Text>
+    <MultiSelectField label="Subtitle languages" values={subtitleLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setSubtitleLanguages} hint="Choose languages present in the release." />
+    <MultiSelectField label="Dubbing audio languages" values={dubbingLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setDubbingLanguages} hint="Choose languages present in the release." />
     <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isExclusiveVip }} style={styles.secondaryFlowBtn} disabled={busy} onPress={() => setIsExclusiveVip(!isExclusiveVip)}><Text style={styles.secondaryFlowText}>{isExclusiveVip ? '☑ VIP exclusive' : '☐ VIP exclusive'}</Text></TouchableOpacity>
     {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
     {busy && <Text style={styles.screenSubTitle}>Uploading posters and video: {progress}%</Text>}
@@ -2152,6 +2253,8 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
 }) {
   const [title, setTitle] = useState('');
   const [durationSeconds, setDurationSeconds] = useState('');
+  const [subtitleLanguages, setSubtitleLanguages] = useState<string[]>([]);
+  const [dubbingLanguages, setDubbingLanguages] = useState<string[]>([]);
   const [video, setVideo] = useState<CreatorVideoFile | null>(null);
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState('');
@@ -2183,7 +2286,7 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
     setProgress(0);
     try {
       const mediaKey = await uploadCreatorVideoFile(video, setProgress);
-      const result = await addCreatorEpisode(submission.id, { title: title.trim(), durationSeconds: duration, mediaKey });
+      const result = await addCreatorEpisode(submission.id, { title: title.trim(), durationSeconds: duration, mediaKey, subtitleLanguages, dubbingLanguages });
       Alert.alert('Episode submitted', `Episode ${result.episodeNumber} was added to “${submission.title}” and the series was sent for review.`);
       onSaved();
     } catch (error) {
@@ -2212,6 +2315,9 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
         <Text style={styles.flowLabel}>Duration (seconds)</Text>
         <TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} keyboardType="number-pad" placeholder="120–300" placeholderTextColor={COLORS.textDim} style={styles.flowInput} />
       </View>
+      <Text style={styles.screenSubTitle}>Select languages included in the release. These are saved as metadata; separate subtitle/audio track files are not uploaded or playable yet.</Text>
+      <MultiSelectField label="Subtitle languages" values={subtitleLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setSubtitleLanguages} hint="Choose languages present in the release." />
+      <MultiSelectField label="Dubbing audio languages" values={dubbingLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setDubbingLanguages} hint="Choose languages present in the release." />
       {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
       {busy && <Text style={styles.screenSubTitle}>Uploading episode: {progress}%</Text>}
       {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
@@ -3087,10 +3193,13 @@ const styles = StyleSheet.create({
   profileAccountStatusText: { color: COLORS.green, fontSize: 9, fontWeight: '800' },
   profileEmail: { color: COLORS.textDim, fontSize: 12, marginTop: 4 },
   profileHeroDivider: { height: 1, backgroundColor: COLORS.cardBorder, marginTop: 17, marginBottom: 14 },
-  profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   profileMetaColumn: { flex: 1, minWidth: 0 },
   profileMetaLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   profileMetaValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', marginTop: 4 },
+  profileCoinBalanceButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, marginTop: 2 },
+  profileCoinBalanceValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
+  profileCoinBalanceArrow: { color: COLORS.cyan, fontSize: 17, fontWeight: '800' },
   profileVipValue: { color: COLORS.gold },
   profileSection: { marginTop: 25 },
   engagementPreferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 10 },
@@ -3106,6 +3215,21 @@ const styles = StyleSheet.create({
   profilePlanCard: { flex: 1, minHeight: 80, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, justifyContent: 'center' },
   profilePlanName: { color: COLORS.textDim, fontSize: 12, fontWeight: '700' },
   profilePlanPrice: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 5 },
+  coinModal: { width: '100%', maxWidth: 400, alignSelf: 'center', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, padding: 18 },
+  coinModalHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  coinModalBalanceRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 8 },
+  coinModalBalance: { color: COLORS.gold, fontSize: 18, fontWeight: '900' },
+  coinPackRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 4 },
+  coinPackInfo: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  coinPackAmount: { color: COLORS.textLight, fontSize: 14, fontWeight: '700' },
+  coinPackPrice: { color: COLORS.cyan, fontSize: 14, fontWeight: '900' },
+  coinMark: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#f5d477', backgroundColor: '#d99b2b' },
+  coinMarkLarge: { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5 },
+  coinMarkInner: { width: 15, height: 15, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#9b6418' },
+  coinMarkInnerLarge: { width: 23, height: 23, borderRadius: 12 },
+  coinMarkLetter: { color: '#855313', fontSize: 10, lineHeight: 12, fontWeight: '900' },
+  coinMarkLetterLarge: { fontSize: 15, lineHeight: 17 },
+  coinMarkShine: { position: 'absolute', top: 3, right: 4, width: 3, height: 3, borderRadius: 2, backgroundColor: '#fff0bd' },
   profileRefreshButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 12, backgroundColor: COLORS.cyanSoft },
   profileRefreshText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
   profileNotice: { color: COLORS.cyan, fontSize: 12, lineHeight: 18, marginTop: 14 },

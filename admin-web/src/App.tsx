@@ -32,6 +32,8 @@ import { formatDate, formatDateTime } from './formatDate';
 import { contentCategories, contentGenres } from './contentOptions';
 import cinevaLogo from '../../assets/brand/cineva-logo.svg';
 
+const mediaTrackLanguages = ['Malay', 'English', 'Mandarin', 'Tamil', 'Indonesian', 'Japanese', 'Korean', 'Thai'];
+
 type View =
   | 'overview'
   | 'analytics'
@@ -622,6 +624,8 @@ function ContentReview({
     isExclusiveVip: false,
     episodeTitle: '',
     durationSeconds: '2400',
+    subtitleLanguages: [] as string[],
+    dubbingLanguages: [] as string[],
     latitude: '',
     longitude: '',
   });
@@ -708,6 +712,8 @@ function ContentReview({
         isExclusiveVip: false,
         episodeTitle: '',
         durationSeconds: '2400',
+        subtitleLanguages: [],
+        dubbingLanguages: [],
         latitude: '',
         longitude: '',
       });
@@ -902,6 +908,27 @@ function ContentReview({
                 required
               />
             </label>
+            <label>
+              Subtitle languages
+              <select
+                multiple
+                value={form.subtitleLanguages}
+                onChange={event => update('subtitleLanguages', Array.from(event.target.selectedOptions, option => option.value))}
+              >
+                {mediaTrackLanguages.map(value => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label>
+              Dubbing audio languages
+              <select
+                multiple
+                value={form.dubbingLanguages}
+                onChange={event => update('dubbingLanguages', Array.from(event.target.selectedOptions, option => option.value))}
+              >
+                {mediaTrackLanguages.map(value => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <p className="coordinate-hint wide-field">Hold Ctrl or Cmd to select multiple languages. These selections save track metadata only; separate subtitle/audio files are not uploaded or playable yet.</p>
             <label className="wide-field">
               Description
               <textarea

@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { pool } from './db.js';
+import { COIN_PACKS, CoinPackCode } from './coins.js';
 import { verifyStripeWebhookSignature } from './stripeWebhook.js';
 
 export type VipPlan = 'VIP_MONTHLY' | 'VIP_YEARLY';
@@ -143,6 +144,44 @@ export async function createVipCheckout(user: { id: string; name: string; email:
   }
 }
 
+export async function createCoinCheckout(user: { id: string; email: string }, packCode: CoinPackCode) {
+  const pack = COIN_PACKS.find(item => item.code === packCode);
+  if (!pack) throw httpError('Choose a supported coin pack.', 400);
+  const settings = stripeConfig();
+  const topup = await pool.query<{ id: string }>(
+    'INSERT INTO coin_topups (user_id, pack_code, coin_amount, amount_sen) VALUES ($1, $2, $3, $4) RETURNING id',
+    [user.id, pack.code, pack.coins, pack.amountSen],
+  );
+  const topupId = topup.rows[0].id;
+  try {
+    const fields = new URLSearchParams();
+    fields.set('mode', 'payment');
+    fields.set('payment_method_types[0]', 'card');
+    fields.set('payment_method_types[1]', 'fpx');
+    fields.set('line_items[0][price_data][currency]', 'myr');
+    fields.set('line_items[0][price_data][unit_amount]', String(pack.amountSen));
+    fields.set('line_items[0][price_data][product_data][name]', `CINEVA ${pack.coins} Coins`);
+    fields.set('line_items[0][quantity]', '1');
+    fields.set('customer_email', user.email);
+    fields.set('client_reference_id', topupId);
+    fields.set('metadata[purchaseType]', 'COINS');
+    fields.set('metadata[coinTopupId]', topupId);
+    fields.set('success_url', `${settings.publicApiUrl}/api/v1/payments/stripe/return?session_id={CHECKOUT_SESSION_ID}`);
+    fields.set('cancel_url', `${settings.publicApiUrl}/api/v1/payments/stripe/cancel`);
+
+    const session = await postCheckoutSession(fields, topupId);
+    await pool.query('UPDATE coin_topups SET stripe_session_id = $1 WHERE id = $2', [session.id, topupId]);
+    return { paymentUrl: session.url, coins: pack.coins };
+  } catch (error) {
+    try {
+      await pool.query("UPDATE coin_topups SET status = 'FAILED' WHERE id = $1 AND status = 'PENDING'", [topupId]);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Coin checkout failed and its pending top-up could not be marked failed.');
+    }
+    throw error;
+  }
+}
+
 type StripeCheckoutSession = {
   id?: unknown;
   client_reference_id?: unknown;
@@ -194,9 +233,61 @@ export async function processStripeWebhook(rawBody: Buffer, signatureHeader: str
   if (!metadata || typeof metadata !== 'object') {
     throw httpError('Stripe checkout event is missing payment metadata.', 400);
   }
-  const paymentId = (metadata as Record<string, unknown>).paymentTransactionId;
-  const subscriptionId = (metadata as Record<string, unknown>).subscriptionId;
-  const plan = (metadata as Record<string, unknown>).plan;
+  const metadataValues = metadata as Record<string, unknown>;
+  if (metadataValues.purchaseType === 'COINS') {
+    const topupId = metadataValues.coinTopupId;
+    if (typeof topupId !== 'string' || session.client_reference_id !== topupId) {
+      throw httpError('Stripe checkout event has invalid coin top-up metadata.', 400);
+    }
+    const isPaid = event.type === 'checkout.session.async_payment_succeeded' || session.payment_status === 'paid';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const topupResult = await client.query<{
+        id: string;
+        user_id: string;
+        coin_amount: number;
+        amount_sen: number;
+        status: string;
+        stripe_session_id: string | null;
+      }>('SELECT id, user_id, coin_amount, amount_sen, status, stripe_session_id FROM coin_topups WHERE id = $1 FOR UPDATE', [topupId]);
+      const topup = topupResult.rows[0];
+      if (!topup) throw httpError('Coin top-up does not exist.', 404);
+      if (topup.stripe_session_id && topup.stripe_session_id !== session.id) {
+        throw httpError('Stripe checkout session does not match the coin top-up.', 409);
+      }
+      if (topup.status === 'PAID') {
+        await client.query('COMMIT');
+        return;
+      }
+      if (!topup.stripe_session_id) {
+        await client.query('UPDATE coin_topups SET stripe_session_id = $1 WHERE id = $2', [session.id, topup.id]);
+      }
+      if (successfulPayment && isPaid) {
+        const amountMatches = Number.isInteger(session.amount_total) && session.amount_total === topup.amount_sen;
+        const currencyMatches = session.currency === 'myr';
+        if (!amountMatches || !currencyMatches) {
+          await client.query("UPDATE coin_topups SET status = 'FAILED' WHERE id = $1", [topup.id]);
+          console.error('Stripe coin top-up amount or currency did not match its pending payment.');
+        } else {
+          await client.query('UPDATE users SET coin_balance = coin_balance + $1 WHERE id = $2', [topup.coin_amount, topup.user_id]);
+          await client.query("UPDATE coin_topups SET status = 'PAID', paid_at = now() WHERE id = $1", [topup.id]);
+        }
+      } else if (failedPayment && topup.status === 'PENDING') {
+        await client.query("UPDATE coin_topups SET status = 'FAILED' WHERE id = $1", [topup.id]);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return;
+  }
+  const paymentId = metadataValues.paymentTransactionId;
+  const subscriptionId = metadataValues.subscriptionId;
+  const plan = metadataValues.plan;
   if (typeof paymentId !== 'string' || typeof subscriptionId !== 'string' || typeof plan !== 'string' || session.client_reference_id !== paymentId) {
     throw httpError('Stripe checkout event has invalid payment metadata.', 400);
   }

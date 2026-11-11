@@ -82,5 +82,11 @@ await applySql(await readFile(path.resolve(malaysiaStateTargetingPath), 'utf8'))
 const industryMarketplacePath = fileURLToPath(new URL('../sql/018_industry_marketplace.sql', import.meta.url));
 await applySql(await readFile(path.resolve(industryMarketplacePath), 'utf8'));
 
+const demoContentCleanupPath = fileURLToPath(new URL('../sql/019_remove_remaining_demo_content.sql', import.meta.url));
+await applySql(await readFile(path.resolve(demoContentCleanupPath), 'utf8'));
+
+const coinsAndTracksPath = fileURLToPath(new URL('../sql/020_coins_and_episode_tracks.sql', import.meta.url));
+await applySql(await readFile(path.resolve(coinsAndTracksPath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

@@ -28,7 +28,7 @@ export const registerRequestSchema = registerSchema.extend({
 });
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
-export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean; adPersonalizationEnabled: boolean; adAgeRange: string | null; adGender: string | null }
+export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; coinBalance: number; locationAnalyticsEnabled: boolean; adPersonalizationEnabled: boolean; adAgeRange: string | null; adGender: string | null }
 interface AuthenticatedRequest extends Request { authenticatedUser?: AuthenticatedUser }
 interface RegistrationAdPreferences {
   enabled: boolean;
@@ -144,12 +144,13 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: UserRole;
       roles: UserRole[];
       is_vip: boolean;
+      coin_balance: number;
       location_analytics_enabled: boolean;
       ad_personalization_enabled: boolean;
       ad_age_range: string | null;
       ad_gender: string | null;
       status: string;
-    }>(`SELECT id, name, email, role, status,
+    }>(`SELECT     id, name, email, role, status, coin_balance,
         ARRAY(SELECT role FROM user_roles WHERE user_id = users.id) AS roles,
         location_analytics_enabled,
         ad_personalization_enabled, ad_age_range, ad_gender,
@@ -171,6 +172,7 @@ export async function requireAuthenticated(request: Request, response: Response,
       role: user.role,
       roles: Array.from(new Set([user.role, ...user.roles])),
       isVip: user.is_vip,
+      coinBalance: user.coin_balance,
       locationAnalyticsEnabled: user.location_analytics_enabled,
       adPersonalizationEnabled: user.ad_personalization_enabled,
       adAgeRange: user.ad_age_range,

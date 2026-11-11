@@ -66,10 +66,34 @@ export interface ViewerProfile {
   role: UserRole;
   roles: UserRole[];
   isVip: boolean;
+  coinBalance: number;
   locationAnalyticsEnabled: boolean;
   adPersonalizationEnabled: boolean;
   adAgeRange: string | null;
   adGender: 'WOMAN' | 'MAN' | 'NON_BINARY' | 'PREFER_NOT_TO_SAY' | null;
+}
+
+export interface CoinWallet {
+  balance: number;
+  unlockedEpisodeIds: string[];
+  episodePrice: number;
+  packs: Array<{ code: 'STARTER' | 'POPULAR' | 'VALUE'; coins: number; amount: string; currency: 'MYR'; label: string }>;
+}
+
+export function getCoinWallet(): Promise<CoinWallet> {
+  return request<CoinWallet>('/coins/wallet');
+}
+
+export function purchaseEpisodeWithCoins(episodeId: string): Promise<{ balance: number; episodeId: string; alreadyUnlocked: boolean }> {
+  return request<{ balance: number; episodeId: string; alreadyUnlocked: boolean }>(`/coins/episodes/${encodeURIComponent(episodeId)}/purchase`, { method: 'POST' });
+}
+
+export function createCoinCheckout(pack: CoinWallet['packs'][number]['code']): Promise<{ paymentUrl: string; coins: number }> {
+  return request<{ paymentUrl: string; coins: number }>('/coins/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pack }),
+  });
 }
 
 interface SessionResponse { token: string; role: UserRole; expiresAt: string }
@@ -594,6 +618,8 @@ export function addCreatorEpisode(id: string, input: {
   title: string;
   durationSeconds: number;
   mediaKey: string;
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
 }) {
   return request<{ id: string; episodeNumber: number; status: 'IN_REVIEW' }>(`/creator/submissions/${encodeURIComponent(id)}/episodes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
@@ -623,6 +649,8 @@ export function submitCreatorContent(payload: {
   durationSeconds: number;
   mediaKey: string;
   isExclusiveVip: boolean;
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
 }) {
   return request<{ id: string; status: 'IN_REVIEW' }>('/creator/submissions', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
