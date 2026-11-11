@@ -36,22 +36,16 @@ import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
 import { isShortEpisodeDuration } from './src/data/episodeDuration';
 
 const Text = ({ style, ...props }: TextProps) => {
-  const textStyle = StyleSheet.flatten(style);
-  const fontSize = textStyle?.fontSize;
   return <NativeText {...props} style={[style, {
-    fontFamily: textStyle?.fontFamily ?? Platform.select({ android: 'sans-serif', ios: 'System' }),
-    fontSize: Math.max((typeof fontSize === 'number' ? fontSize : 16) - 1, 11),
+    fontFamily: StyleSheet.flatten(style)?.fontFamily ?? Platform.select({ android: 'sans-serif', ios: 'System' }),
   }]} />;
 };
 
 const TextInput = ({ style, ...props }: TextInputProps) => {
-  const inputStyle = StyleSheet.flatten(style);
-  const fontSize = inputStyle?.fontSize;
-  const minHeight = inputStyle?.minHeight;
+  const minHeight = StyleSheet.flatten(style)?.minHeight;
   return <NativeTextInput {...props} style={[style, {
     fontFamily: Platform.select({ android: 'sans-serif', ios: 'System' }),
-    fontSize: Math.max((typeof fontSize === 'number' ? fontSize : 16) - 1, 15),
-    minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 52),
+    minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 48),
   }]} />;
 };
 
@@ -133,10 +127,10 @@ export default function App() {
 
   const availableTabs = [
     { key: 'Home', icon: '⌂', label: 'Home' },
-    { key: 'Search', icon: '⚲', label: 'Search' },
-    ...(profile.role === 'ADMIN' || profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '▣', label: 'Creator' }] : []),
+    { key: 'Search', icon: '⌕', label: 'Search' },
+    ...(profile.role === 'ADMIN' || profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '✦', label: 'Studio' }] : []),
     ...(profile.role === 'ADMIN' || profile.roles?.includes('ADVERTISER') || profile.role === 'ADVERTISER' ? [{ key: 'Ads', icon: '▤', label: 'Ads' }] : []),
-    { key: 'Profile', icon: '◉', label: 'Profile' },
+    { key: 'Profile', icon: '○', label: 'Profile' },
   ];
 
   const openDramaDetails = (drama: DramaItem) => {
@@ -205,7 +199,7 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={styles.topHeader}>
             <TouchableOpacity style={styles.headerBackButton} onPress={() => setCurrentScreen('Tabs')}>
-              <Text style={styles.backBtnText}>‹ Back to Home</Text>
+              <Text style={styles.backBtnText}>‹ Back</Text>
             </TouchableOpacity>
           </View>
 
@@ -235,12 +229,12 @@ export default function App() {
               activeOpacity={0.8}
               onPress={() => startPlayback(selectedDrama, selectedDrama.episodes[0]?.title)}
             >
-              <Text style={styles.cyanPrimaryBtnText}>▶ Play Episode</Text>
+              <Text style={styles.cyanPrimaryBtnText}>▶ Play</Text>
             </TouchableOpacity>
 
             {continueWatching.find((item) => item.id === selectedDrama.id) && (
               <TouchableOpacity
-                style={[styles.cyanPrimaryBtn, { marginTop: 12, backgroundColor: '#0f172a', borderColor: '#22d3ee', borderWidth: 1 }]}
+                style={[styles.cyanPrimaryBtn, { marginTop: 12, backgroundColor: COLORS.cyanSoft, borderColor: COLORS.cyan, borderWidth: 1 }]}
                 activeOpacity={0.8}
                 onPress={() => {
                   const item = continueWatching.find((entry) => entry.id === selectedDrama.id);
@@ -385,13 +379,17 @@ export default function App() {
           return (
             <TouchableOpacity
               key={tab.key}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
               style={styles.navItem}
               onPress={() => {
                 setActiveTab(tab.key as any);
                 setCurrentScreen('Tabs');
               }}
             >
-              <Text style={[styles.navIcon, isActive && { color: COLORS.cyan }]}>{tab.icon}</Text>
+              <View style={[styles.navIconWrap, isActive && styles.navIconWrapActive]}>
+                <Text style={[styles.navIcon, isActive && styles.navIconActive]}>{tab.icon}</Text>
+              </View>
               <Text style={[styles.navLabel, isActive && { color: COLORS.cyan }]}>{tab.label}</Text>
             </TouchableOpacity>
           );
@@ -432,13 +430,13 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
         <Text style={styles.authLogo}>GLOBAL STATION</Text>
-        <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
-        <Text style={styles.screenSubTitle}>Your account connects to the Global Station service.</Text>
+        <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Join Global Station' : 'Welcome back'}</Text>
+        <Text style={styles.screenSubTitle}>{registering ? 'Create an account to get started.' : 'Sign in to continue watching.'}</Text>
         {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
         <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
         {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
-        {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
+        {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>You can add creator or advertiser tools later.</Text>}
         {!!error && <Text style={{ color: COLORS.danger, marginTop: 14 }}>{error}</Text>}
         <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={() => {
           if (registering) {
@@ -448,10 +446,10 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
             void submit();
           }
         }}>
-          <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account...' : 'Signing in...') : registering ? 'Review terms and create account' : 'Sign in'}</Text>
+          <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account…' : 'Signing in…') : registering ? 'Create account' : 'Sign in'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={{ alignItems: 'center', padding: 16 }} onPress={() => { setRegistering(!registering); setError(''); }}>
-          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to Global Station? Create account'}</Text>
+          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already a member? Sign in' : 'Create an account'}</Text>
         </TouchableOpacity>
       </ScrollView>
       <TermsAcceptanceModal
@@ -566,7 +564,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
   </>;
   const renderRankedRail = () => rankedDramas.length > 0 && <>
     <View style={styles.sectionTitleRow}>
-      <Text style={styles.sectionHeaderTitle}>Top Videos</Text>
+      <Text style={styles.sectionHeaderTitle}>Popular now</Text>
     </View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railList}>
       {rankedDramas.map((drama, index) => (
@@ -576,7 +574,6 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
             <View style={styles.rankBadge}><Text style={styles.rankBadgeText}>#{index + 1}</Text></View>
           </View>
           <Text numberOfLines={2} style={styles.popularCardTitle}>{drama.title}</Text>
-          <Text style={styles.rankViews}>{drama.trendingViews.toLocaleString()} sessions</Text>
         </TouchableOpacity>
       ))}
     </ScrollView>
@@ -587,8 +584,8 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
       <View style={styles.brandHeader}>
         <Text style={styles.brandTitle}>GLOBAL STATION</Text>
         <View style={styles.headerRightIcons}>
-          <TouchableOpacity onPress={onSearch}><Text style={styles.iconTxt}>⚲</Text></TouchableOpacity>
-          <TouchableOpacity onPress={onProfile}><Text style={styles.iconTxt}>👤</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Search" onPress={onSearch}><Text style={styles.iconTxt}>⌕</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Profile" onPress={onProfile}><Text style={styles.iconTxt}>◎</Text></TouchableOpacity>
         </View>
       </View>
 
@@ -600,7 +597,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
         ))}
       </ScrollView>
 
-      {loading && <Text style={styles.resultsCount}>Loading catalog...</Text>}
+      {loading && <Text style={styles.resultsCount}>Finding something to watch…</Text>}
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -617,7 +614,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 
           <View style={styles.heroBtnRow}>
             <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(visibleDramas[0])}>
-              <Text style={styles.cyanActionBtnText}>▶ Watch Episode 1</Text>
+              <Text style={styles.cyanActionBtnText}>▶ Watch now</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -646,7 +643,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
       {renderRankedRail()}
       {renderRail('Music Videos', musicVideos)}
       {renderRail('Malaysian Originals', malaysianOriginals)}
-      {renderRail('Fresh Drops', newReleases)}
+      {renderRail('New this week', newReleases)}
       {!loading && !error && visibleDramas.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
   );
@@ -655,7 +652,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 // --- TAB 2: SEARCH & FILTER ---
 function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void }) {
   const [query, setQuery] = useState('');
-  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedType, setSelectedType] = useState<'All' | 'MOVIE' | 'SERIES'>('All');
@@ -704,13 +701,12 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
   const activeFilterCount = [selectedGenre, selectedCategory, selectedType].filter(value => value !== 'All').length;
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
+    <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 112 }}>
       <Text style={styles.screenMainTitle}>Search</Text>
-      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, or type.</Text>
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
-          placeholder="Search titles..."
+          placeholder="Search films and series"
           placeholderTextColor={COLORS.textDim}
           style={styles.searchInput}
           value={query}
@@ -863,17 +859,17 @@ function CreatorTabView({ creatorName, onUpload, onEdit, onAddEpisode }: {
 
   return <ScrollView contentContainerStyle={styles.creatorPage}>
     <View style={styles.creatorPageHeading}>
-      <View><Text style={styles.screenMainTitle}>Creator Studio</Text><Text style={styles.screenSubTitle}>{creatorName}</Text></View>
-      <TouchableOpacity style={styles.uploadBtn} onPress={onUpload}><Text style={styles.uploadBtnText}>+ Upload content</Text></TouchableOpacity>
+      <View><Text style={styles.screenMainTitle}>Studio</Text><Text style={styles.screenSubTitle}>{creatorName}</Text></View>
+      <TouchableOpacity style={styles.uploadBtn} onPress={onUpload}><Text style={styles.uploadBtnText}>+ Upload</Text></TouchableOpacity>
     </View>
     <View style={styles.creatorKpiGrid}>
-      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Total plays</Text><Text style={styles.creatorKpiValue}>{totalViews.toLocaleString()}</Text><Text style={styles.creatorKpiFootnote}>Across your videos</Text></View>
-      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Watch time</Text><Text style={styles.creatorKpiValue}>{totalWatchHours.toFixed(1)} h</Text><Text style={styles.creatorKpiFootnote}>Total viewer time</Text></View>
-      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Published</Text><Text style={styles.creatorKpiValue}>{publishedCount}</Text><Text style={styles.creatorKpiFootnote}>Approved titles</Text></View>
-      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Available payout</Text><Text style={styles.creatorKpiValue}>RM {Number(dashboard?.payouts.available ?? 0).toFixed(2)}</Text><Text style={styles.creatorKpiFootnote}>Earned RM {Number(dashboard?.payouts.earned ?? 0).toFixed(2)}</Text></View>
+      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Plays</Text><Text style={styles.creatorKpiValue}>{totalViews.toLocaleString()}</Text></View>
+      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Watch time</Text><Text style={styles.creatorKpiValue}>{totalWatchHours.toFixed(1)} h</Text></View>
+      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Published</Text><Text style={styles.creatorKpiValue}>{publishedCount}</Text></View>
+      <View style={styles.creatorKpiCard}><Text style={styles.creatorKpiLabel}>Available</Text><Text style={styles.creatorKpiValue}>RM {Number(dashboard?.payouts.available ?? 0).toFixed(2)}</Text></View>
     </View>
 
-    <View style={styles.creatorSectionHeading}><View><Text style={styles.screenMainTitle}>Your videos</Text><Text style={styles.screenSubTitle}>{submissions.length} submissions</Text></View><TouchableOpacity style={styles.secondaryFlowBtn} disabled={loading} onPress={loadDashboard}><Text style={styles.secondaryFlowText}>{loading ? 'Refreshing…' : 'Refresh'}</Text></TouchableOpacity></View>
+    <View style={styles.creatorSectionHeading}><View><Text style={styles.screenMainTitle}>Your videos</Text><Text style={styles.screenSubTitle}>{submissions.length} total</Text></View><TouchableOpacity style={styles.secondaryFlowBtn} disabled={loading} onPress={loadDashboard}><Text style={styles.secondaryFlowText}>{loading ? 'Refreshing…' : 'Refresh'}</Text></TouchableOpacity></View>
     {loading && <Text style={styles.creatorEmpty}>Loading creator data…</Text>}
     {!!error && <Text style={styles.errorText}>{error}</Text>}
     {!loading && !error && submissions.length === 0 && <Text style={styles.creatorEmpty}>Your submitted videos will appear here.</Text>}
@@ -942,20 +938,20 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
   return (
     <ScrollView contentContainerStyle={styles.advertiserPage}>
       <View style={styles.advertiserHeader}>
-        <View><Text style={styles.screenMainTitle}>Advertiser campaigns</Text><Text style={styles.screenSubTitle}>Budget and delivery at a glance</Text></View>
+        <View><Text style={styles.screenMainTitle}>Campaigns</Text></View>
         <View style={styles.advertiserHeaderActions}>
           <TouchableOpacity style={styles.advertiserRefresh} disabled={loading} onPress={loadCampaigns}><Text style={styles.secondaryFlowText}>{loading ? 'Refreshing…' : 'Refresh'}</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.uploadBtn} onPress={onCampaign}><Text style={styles.uploadBtnText}>+ New campaign</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.uploadBtn} onPress={onCampaign}><Text style={styles.uploadBtnText}>+ New</Text></TouchableOpacity>
         </View>
       </View>
       <View style={styles.advertiserSummaryGrid}>
-        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Active campaigns</Text><Text style={styles.advertiserSummaryValue}>{activeCampaigns.length}</Text></View>
-        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Budget remaining</Text><Text style={styles.advertiserSummaryValue}>RM {remaining.toFixed(2)}</Text></View>
-        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Total allocated</Text><Text style={styles.advertiserSummaryValue}>RM {totalBudget.toFixed(2)}</Text></View>
-        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Impressions served</Text><Text style={styles.advertiserSummaryValue}>{impressions.toLocaleString()}</Text></View>
+        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Active</Text><Text style={styles.advertiserSummaryValue}>{activeCampaigns.length}</Text></View>
+        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Remaining</Text><Text style={styles.advertiserSummaryValue}>RM {remaining.toFixed(2)}</Text></View>
+        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Budget</Text><Text style={styles.advertiserSummaryValue}>RM {totalBudget.toFixed(2)}</Text></View>
+        <View style={styles.advertiserSummaryCard}><Text style={styles.advertiserSummaryLabel}>Impressions</Text><Text style={styles.advertiserSummaryValue}>{impressions.toLocaleString()}</Text></View>
       </View>
       {!!error && <Text style={styles.errorText}>{error}</Text>}
-      {!loading && !error && campaigns.length === 0 && <View style={styles.advertiserEmpty}><Text style={styles.screenMainTitle}>No campaigns yet</Text><Text style={styles.screenSubTitle}>Create a campaign to preview its reach and track delivery.</Text><TouchableOpacity style={[styles.uploadBtn, { marginTop: 16 }]} onPress={onCampaign}><Text style={styles.uploadBtnText}>Create campaign</Text></TouchableOpacity></View>}
+      {!loading && !error && campaigns.length === 0 && <View style={styles.advertiserEmpty}><Text style={styles.screenMainTitle}>No campaigns yet</Text><Text style={styles.screenSubTitle}>Start your first campaign.</Text><TouchableOpacity style={[styles.uploadBtn, { marginTop: 16 }]} onPress={onCampaign}><Text style={styles.uploadBtnText}>Create campaign</Text></TouchableOpacity></View>}
       {campaigns.map(campaign => {
         const budget = Number(campaign.totalBudget);
         const remainingBudget = Number(campaign.remainingBudget);
@@ -990,7 +986,14 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
   const [adPersonalization, setAdPersonalization] = useState(profile.adPersonalizationEnabled);
   const [adAgeRange, setAdAgeRange] = useState(profile.adAgeRange ?? '');
   const [adGender, setAdGender] = useState(profile.adGender ?? '');
+  const [adPreferencesExpanded, setAdPreferencesExpanded] = useState(false);
   const [savingAdPreferences, setSavingAdPreferences] = useState(false);
+
+  useEffect(() => {
+    setAdPersonalization(profile.adPersonalizationEnabled);
+    setAdAgeRange(profile.adAgeRange ?? '');
+    setAdGender(profile.adGender ?? '');
+  }, [profile.adPersonalizationEnabled, profile.adAgeRange, profile.adGender]);
 
   async function upgradeRole(role: 'CREATOR' | 'ADVERTISER') {
     setBusyUpgrade(role);
@@ -1040,7 +1043,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
     <ScrollView contentContainerStyle={styles.profilePage}>
       <View style={styles.profilePageHeader}>
         <Text style={styles.profilePageTitle}>Profile</Text>
-        <Text style={styles.profilePageSubtitle}>Manage your account</Text>
+        <Text style={styles.profilePageSubtitle}>Your account</Text>
       </View>
 
       <View style={styles.profileHero}>
@@ -1073,28 +1076,70 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
       </View>
 
       <View style={styles.profileSection}>
-        <Text style={styles.profileSectionTitle}>Ad personalization</Text>
-        <Text style={styles.engagementActionSub}>Optional. Share broad age and gender details for relevant ads. Location targeting uses your approximate country when available.</Text>
-        <View style={styles.engagementPreferenceRow}>
-          <Text style={styles.profileActionTitle}>Allow age and gender targeting</Text>
-          <Switch accessibilityLabel="Allow age and gender ad personalization" value={adPersonalization} onValueChange={setAdPersonalization} trackColor={{ false: '#dce5df', true: COLORS.cyanDark }} thumbColor={adPersonalization ? COLORS.cyan : '#cbd5e1'} />
+        <Text style={styles.profileSectionTitle}>Privacy & ads</Text>
+        <View style={styles.profilePrivacyCard}>
+          <View style={styles.profileAdToggleRow}>
+            <View style={styles.profileAdCopy}>
+              <Text style={styles.profileActionTitle}>Personalized ads</Text>
+              <Text style={styles.engagementActionSub}>Use details you choose for ads. Location is separate.</Text>
+            </View>
+            <Switch
+              accessibilityLabel="Personalized ads"
+              accessibilityHint="Use optional age range and gender details to tailor ads."
+              value={adPersonalization}
+              onValueChange={setAdPersonalization}
+              trackColor={{ false: '#dce5df', true: COLORS.cyanDark }}
+              thumbColor={adPersonalization ? COLORS.cyan : '#cbd5e1'}
+            />
+          </View>
+          {adPersonalization && <>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ expanded: adPreferencesExpanded }}
+              style={styles.profileAdDetailsToggle}
+              onPress={() => setAdPreferencesExpanded(expanded => !expanded)}
+            >
+              <Text style={styles.profileAdDetailsText}>{adPreferencesExpanded ? 'Hide optional details' : 'Choose optional details'}</Text>
+              <Text style={styles.profileRoleArrow}>{adPreferencesExpanded ? '⌃' : '›'}</Text>
+            </TouchableOpacity>
+            {adPreferencesExpanded && <View style={styles.profileAdDetails}>
+              <Text style={styles.engagementActionSub}>Leave either blank to keep it private.</Text>
+              <SelectField label="Age range · optional" value={adAgeRange} options={['18-24', '25-34', '35-44', '45+']} allowClear onChange={setAdAgeRange} />
+              <SelectField
+                label="Gender · optional"
+                value={adGender}
+                allowClear
+                options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']}
+                formatOption={value => value === 'NON_BINARY'
+                  ? 'Non-binary'
+                  : value === 'PREFER_NOT_TO_SAY'
+                    ? 'Prefer not to say'
+                    : value === 'WOMAN' ? 'Woman' : 'Man'}
+                onChange={setAdGender}
+              />
+            </View>}
+          </>}
+          <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={savingAdPreferences} onPress={async () => {
+            setSavingAdPreferences(true);
+            try {
+              await onAdPreferences({
+                enabled: adPersonalization,
+                ageRange: adPersonalization ? adAgeRange || null : null,
+                gender: adPersonalization && adGender ? adGender as NonNullable<ViewerProfile['adGender']> : null,
+              });
+              setMessage('Saved.');
+            } catch (error) {
+              setMessage(error instanceof Error ? error.message : 'Unable to save ad preferences.');
+            } finally {
+              setSavingAdPreferences(false);
+            }
+          }}><Text style={styles.profileRefreshText}>{savingAdPreferences ? 'Saving…' : 'Save preferences'}</Text></TouchableOpacity>
         </View>
-        {adPersonalization && <>
-          <SelectField label="Age range" value={adAgeRange} options={['18-24', '25-34', '35-44', '45+']} onChange={setAdAgeRange} />
-          <SelectField label="Gender" value={adGender} options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']} onChange={value => setAdGender(value as NonNullable<ViewerProfile['adGender']>)} />
-        </>}
-        <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={savingAdPreferences} onPress={async () => {
-          if (adPersonalization && (!adAgeRange || !adGender)) { setMessage('Choose an age range and gender, or turn personalization off.'); return; }
-          setSavingAdPreferences(true);
-          try { await onAdPreferences({ enabled: adPersonalization, ageRange: adAgeRange || null, gender: adGender ? adGender as NonNullable<ViewerProfile['adGender']> : null }); setMessage('Ad preferences saved.'); }
-          catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to save ad preferences.'); }
-          finally { setSavingAdPreferences(false); }
-        }}><Text style={styles.profileRefreshText}>{savingAdPreferences ? 'Saving...' : 'Save ad preferences'}</Text></TouchableOpacity>
       </View>
 
       {missingRoles.length > 0 && (
         <View style={styles.profileSection}>
-          <Text style={styles.profileSectionTitle}>More ways to use Global Station</Text>
+          <Text style={styles.profileSectionTitle}>More tools</Text>
           <View style={styles.profileRoleGrid}>
             {missingRoles.includes('CREATOR') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleTermsAccepted(false); setRoleToConfirm('CREATOR'); }}>
               <Text style={styles.profileRoleIcon}>✦</Text>
@@ -1115,7 +1160,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
           <Text style={styles.profileSectionTitle}>VIP membership</Text>
           {profile.isVip && <Text style={styles.profileActiveLabel}>ACTIVE</Text>}
         </View>
-        <Text style={styles.engagementActionSub}>Free viewing is supported by ads. VIP unlocks exclusive episodes.</Text>
+        <Text style={styles.engagementActionSub}>Ad-free viewing and exclusive episodes.</Text>
         <View style={styles.profilePlanGrid}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Monthly VIP membership, RM 14.90" style={styles.profilePlanCard} disabled={busyPlan !== null} onPress={() => beginCheckout('VIP_MONTHLY')}>
             <Text style={styles.profilePlanName}>Monthly</Text>
@@ -1127,7 +1172,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
           </TouchableOpacity>
         </View>
         <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={busyPlan !== null} onPress={refreshMembership}>
-          <Text style={styles.profileRefreshText}>{busyPlan ? 'Opening checkout...' : 'Refresh membership status'}</Text>
+          <Text style={styles.profileRefreshText}>{busyPlan ? 'Opening checkout…' : 'Refresh membership'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -1136,8 +1181,8 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
       <View style={styles.profileActions}>
         <TouchableOpacity accessibilityRole="button" style={styles.profileActionRow} onPress={onEngagement}>
           <View>
-            <Text style={styles.profileActionTitle}>Notifications & referrals</Text>
-            <Text style={styles.engagementActionSub}>Inbox, preferences and invite code</Text>
+            <Text style={styles.profileActionTitle}>Activity & invites</Text>
+            <Text style={styles.engagementActionSub}>Notifications and invite code</Text>
           </View>
           <Text style={styles.profileRoleArrow}>›</Text>
         </TouchableOpacity>
@@ -1600,20 +1645,21 @@ function PayoutScreen({ onBack }: { onBack: () => void }) {
   </ScrollView></View>;
 }
 
-function SelectField({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+function SelectField({ label, value, options, onChange, allowClear = false, formatOption = option => option }: { label: string; value: string; options: string[]; onChange: (value: string) => void; allowClear?: boolean; formatOption?: (option: string) => string }) {
   const [visible, setVisible] = useState(false);
+  const selectableOptions = allowClear ? ['', ...options] : options;
   return <View style={styles.flowField}>
     <Text style={styles.flowLabel}>{label}</Text>
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${label}: ${value}`} style={styles.selectField} onPress={() => setVisible(true)}>
-      <Text style={styles.selectValue}>{value}</Text><Text style={styles.selectChevron}>⌄</Text>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${label}: ${value ? formatOption(value) : 'Not set'}`} style={styles.selectField} onPress={() => setVisible(true)}>
+      <Text style={[styles.selectValue, !value && styles.selectValuePlaceholder]}>{value ? formatOption(value) : 'Not set'}</Text><Text style={styles.selectChevron}>⌄</Text>
     </TouchableOpacity>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
       <View style={styles.selectModalBackdrop}>
         <View style={styles.selectModal}>
           <Text style={styles.selectModalTitle}>{label}</Text>
           <ScrollView style={{ maxHeight: 360 }}>
-            {options.map((option) => <TouchableOpacity key={option} style={styles.selectOption} onPress={() => { onChange(option); setVisible(false); }}>
-              <Text style={[styles.selectOptionText, option === value && styles.selectOptionTextSelected]}>{option}</Text>
+            {selectableOptions.map((option) => <TouchableOpacity key={option || 'unset'} style={styles.selectOption} onPress={() => { onChange(option); setVisible(false); }}>
+              <Text style={[styles.selectOptionText, option === value && styles.selectOptionTextSelected]}>{option ? formatOption(option) : 'Not set'}</Text>
               {option === value && <Text style={styles.selectCheck}>✓</Text>}
             </TouchableOpacity>)}
           </ScrollView>
@@ -2196,22 +2242,23 @@ function SupportScreen({ onBack }: { onBack: () => void }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   flowScreen: { flex: 1, backgroundColor: COLORS.bg },
-  flowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
-  flowHeaderTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
-  flowContent: { padding: 16, paddingBottom: 100 },
-  flowMetric: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16, marginTop: 16 },
-  flowField: { marginTop: 14 },
-  flowLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', marginBottom: 6 },
-  flowInput: { minHeight: 44, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: COLORS.textLight, paddingHorizontal: 12, paddingVertical: 10, fontSize: 12 },
+  flowHeader: { minHeight: 58, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
+  flowHeaderTitle: { color: COLORS.textLight, fontSize: 16, fontWeight: '800' },
+  flowContent: { padding: 20, paddingBottom: 112 },
+  flowMetric: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 18, marginTop: 16 },
+  flowField: { marginTop: 16 },
+  flowLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700', marginBottom: 7 },
+  flowInput: { minHeight: 48, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 13, color: COLORS.textLight, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15 },
   flowTextArea: { minHeight: 76, textAlignVertical: 'top' },
-  selectField: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, paddingHorizontal: 12 },
-  selectValue: { color: COLORS.textLight, fontSize: 12 },
+  selectField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 13, paddingHorizontal: 14 },
+  selectValue: { color: COLORS.textLight, fontSize: 14 },
+  selectValuePlaceholder: { color: COLORS.textDim },
   multiSelectPlaceholder: { color: COLORS.textDim, fontSize: 12 },
   multiSelectHint: { color: COLORS.textDim, fontSize: 11, marginTop: 5 },
   selectChevron: { color: COLORS.cyan, fontSize: 18, fontWeight: '800' },
   selectModalBackdrop: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.72)' },
-  selectModal: { maxHeight: '80%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 10, padding: 16 },
-  termsModal: { width: '100%', maxHeight: '90%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, padding: 18 },
+  selectModal: { maxHeight: '80%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 22, padding: 20 },
+  termsModal: { width: '100%', maxHeight: '90%', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 22, padding: 20 },
   termsDraftNotice: { color: COLORS.gold, backgroundColor: '#fff3d9', borderRadius: 8, padding: 10, fontSize: 12, lineHeight: 17, marginTop: 8 },
   termsBody: { flexGrow: 0, maxHeight: 300, marginTop: 12 },
   termsBodyContent: { paddingBottom: 8 },
@@ -2233,30 +2280,30 @@ const styles = StyleSheet.create({
   supportChat: { backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9, padding: 14, marginTop: 18 },
   chatAgent: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   chatMessage: { color: COLORS.textLight, fontSize: 12, marginTop: 8, lineHeight: 18 },
-  secondaryFlowBtn: { alignItems: 'center', paddingVertical: 13, marginTop: 10, borderRadius: 7, borderWidth: 1, borderColor: COLORS.cardBorder },
-  secondaryFlowText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
-  topHeader: { minHeight: 56, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 6, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
+  secondaryFlowBtn: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, marginTop: 10, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder },
+  secondaryFlowText: { color: COLORS.cyan, fontSize: 14, fontWeight: '800' },
+  topHeader: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 6, borderBottomWidth: 1, borderColor: COLORS.cardBorder },
   headerBackButton: { minHeight: 44, justifyContent: 'center', paddingRight: 12 },
   backBtnText: { color: COLORS.cyan, fontSize: 16, fontWeight: '700' },
-  detailsContent: { paddingHorizontal: 18, paddingBottom: 104 },
+  detailsContent: { paddingHorizontal: 20, paddingBottom: 112 },
 
   brandHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 4,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 6,
   },
-  brandTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textLight, letterSpacing: 1.1 },
-  authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 21, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  brandTitle: { fontSize: 17, fontWeight: '900', color: COLORS.textLight, letterSpacing: 1.4 },
+  authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 20, fontWeight: '900', letterSpacing: 1.6, marginBottom: 8 },
   headerRightIcons: { flexDirection: 'row', gap: 8 },
   iconTxt: { color: COLORS.textLight, fontSize: 20, minWidth: 44, minHeight: 44, textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 7, paddingVertical: 9 },
 
-  homeLaneRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-  homeLaneChip: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 19, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
+  homeLaneRow: { paddingHorizontal: 20, paddingVertical: 12, gap: 9 },
+  homeLaneChip: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 20, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
   homeLaneChipActive: { backgroundColor: COLORS.cyan, borderColor: COLORS.cyan },
-  homeLaneText: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700' },
+  homeLaneText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '700' },
   homeLaneTextActive: { color: '#ffffff', fontWeight: '900' },
   rankBadge: { position: 'absolute', left: 7, top: 7, minWidth: 34, height: 30, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7, borderRadius: 9, backgroundColor: COLORS.gold },
   rankBadgeText: { color: '#17130b', fontSize: 15, fontWeight: '900' },
@@ -2274,17 +2321,19 @@ const styles = StyleSheet.create({
   chipText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#ffffff', fontWeight: '800' },
 
-  heroCard: { marginHorizontal: 18, marginTop: 8, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder },
+  heroCard: { marginHorizontal: 20, marginTop: 8, borderRadius: 22, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
   heroPosterImage: {
     width: '100%',
-    height: 150,
+    height: 205,
     backgroundColor: COLORS.cardBg,
     borderBottomWidth: 1,
     borderColor: COLORS.cardBorder,
   },
   heroGradient: {
     backgroundColor: COLORS.cardBg,
-    padding: 14,
+    paddingHorizontal: 17,
+    paddingTop: 15,
+    paddingBottom: 17,
   },
   heroPosterPlaceholder: {
     backgroundColor: COLORS.cardBg,
@@ -2313,23 +2362,23 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  heroDramaTitle: { color: COLORS.textLight, fontSize: 18, fontWeight: '800' },
-  heroSub: { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
+  heroDramaTitle: { color: COLORS.textLight, fontSize: 21, fontWeight: '900' },
+  heroSub: { color: COLORS.textMuted, fontSize: 14, marginTop: 5 },
   heroBtnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   cyanActionBtn: {
     backgroundColor: COLORS.cyan,
-    minHeight: 46,
+    minHeight: 48,
     justifyContent: 'center',
     paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 9,
+    paddingHorizontal: 17,
+    borderRadius: 14,
   },
-  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
+  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 14 },
   listActionBtn: {
     backgroundColor: COLORS.cardBg,
-    paddingVertical: 10,
+    paddingVertical: 11,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
@@ -2340,22 +2389,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingRight: 16,
-    marginTop: 16,
+    marginTop: 23,
   },
-  sectionHeaderTitle: { color: COLORS.textLight, fontSize: 18, fontWeight: '700', marginLeft: 18, marginTop: 16 },
-  seeAllText: { color: COLORS.cyan, fontSize: 13, fontWeight: '600' },
+  sectionHeaderTitle: { color: COLORS.textLight, fontSize: 19, fontWeight: '800', marginLeft: 20, marginTop: 18 },
+  seeAllText: { color: COLORS.cyan, fontSize: 14, fontWeight: '700' },
 
-  railList: { paddingHorizontal: 18, paddingVertical: 10, gap: 10 },
+  railList: { paddingHorizontal: 20, paddingVertical: 12, gap: 13 },
   continueCard: {
-    width: 148,
+    width: 164,
     backgroundColor: COLORS.cardBg,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     overflow: 'hidden',
   },
   continuePosterPlaceholder: {
-    height: 84,
+    height: 100,
     backgroundColor: '#edf2ef',
     justifyContent: 'center',
     alignItems: 'center',
@@ -2367,15 +2416,15 @@ const styles = StyleSheet.create({
   cardFooterRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 8 },
   metaSmallText: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
 
-  popularCard: { width: 120, minHeight: 232, borderRadius: 12, overflow: 'hidden' },
-  popularPosterFrame: { width: 120, height: 180, borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: COLORS.cardBg },
+  popularCard: { width: 140, minHeight: 224, borderRadius: 16, overflow: 'hidden' },
+  popularPosterFrame: { width: 140, height: 190, borderRadius: 16, overflow: 'hidden', position: 'relative', backgroundColor: COLORS.cardBg },
   popularPosterPlaceholder: {
     width: '100%',
     height: '100%',
     backgroundColor: COLORS.cardBg,
-    borderRadius: 12,
+    borderRadius: 16,
   },
-  popularCardTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', lineHeight: 18, marginTop: 7 },
+  popularCardTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', lineHeight: 19, marginTop: 8 },
 
   // Drama Details View
   dramaDescription: { color: COLORS.textMuted, fontSize: 15, marginTop: 16, lineHeight: 23 },
@@ -2384,7 +2433,7 @@ const styles = StyleSheet.create({
   cyanPrimaryBtn: {
     backgroundColor: COLORS.cyan,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: 'center',
     marginTop: 14,
   },
@@ -2394,7 +2443,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.cardBg,
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     marginTop: 10,
@@ -2403,9 +2452,11 @@ const styles = StyleSheet.create({
   episodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   cyanSmallBtn: {
     backgroundColor: COLORS.cyan,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 6,
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
   },
   cyanSmallBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
 
@@ -2501,25 +2552,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.cardBg,
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    minHeight: 54,
+    borderRadius: 16,
+    paddingHorizontal: 15,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    marginTop: 16,
   },
-  searchBarIcon: { color: COLORS.textMuted, fontSize: 16 },
-  searchInput: { flex: 1, height: 44, color: COLORS.textLight, paddingHorizontal: 10 },
+  searchBarIcon: { color: COLORS.textMuted, fontSize: 18 },
+  searchInput: { flex: 1, height: 52, color: COLORS.textLight, paddingHorizontal: 11, fontSize: 15 },
   filterIcon: { color: COLORS.textMuted, fontSize: 16 },
-  searchFilterPanel: { marginTop: 14, padding: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, backgroundColor: COLORS.cardBg },
+  searchFilterPanel: { marginTop: 13, paddingHorizontal: 15, paddingVertical: 8, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 16, backgroundColor: COLORS.cardBg },
   searchFilterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 5 },
   searchFilterOptions: { paddingTop: 2 },
-  searchFilterToggle: { flex: 1, minHeight: 36, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginRight: 8 },
+  searchFilterToggle: { flex: 1, minHeight: 46, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginRight: 8 },
   searchFilterHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchFilterToggleText: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', paddingHorizontal: 8 },
-  searchFilterTitle: { color: COLORS.textLight, fontSize: 15, fontWeight: '800' },
+  searchFilterTitle: { color: COLORS.textLight, fontSize: 16, fontWeight: '800' },
   searchFilterCount: { minWidth: 20, height: 20, paddingHorizontal: 5, borderRadius: 10, backgroundColor: COLORS.cyanSoft, alignItems: 'center', justifyContent: 'center' },
   searchFilterCountText: { color: COLORS.cyan, fontSize: 11, fontWeight: '800' },
   searchFilterReset: { color: COLORS.cyan, fontSize: 12, fontWeight: '700', paddingHorizontal: 7, paddingVertical: 5 },
-  searchFilterLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 11 },
+  searchFilterLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginTop: 12 },
   searchFilterRow: { paddingTop: 7, paddingBottom: 2, gap: 7 },
   searchFilterChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
   searchFilterChipActive: { backgroundColor: COLORS.cyanSoft, borderColor: COLORS.cyan },
@@ -2534,45 +2587,45 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: COLORS.dangerSoft,
-    borderColor: '#9f1239',
+    borderColor: COLORS.danger,
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    margin: 16,
+    borderRadius: 14,
+    padding: 14,
+    margin: 20,
   },
   errorText: { color: COLORS.danger, flex: 1, fontSize: 12, marginRight: 10 },
   searchResultCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBg,
-    padding: 10,
-    borderRadius: 10,
+    padding: 12,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
-    marginTop: 10,
+    marginTop: 12,
   },
   searchThumbPlaceholder: {
-    width: 60,
-    height: 60,
+    width: 72,
+    height: 84,
     backgroundColor: COLORS.cardBg,
-    borderRadius: 6,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
   },
   searchThumbLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800' },
-  searchResultTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', flexShrink: 1 },
-  searchResultMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
+  searchResultTitle: { color: COLORS.textLight, fontSize: 15, fontWeight: '800', flexShrink: 1 },
+  searchResultMeta: { color: COLORS.textDim, fontSize: 12, marginTop: 5 },
 
   // Creator & Ads Styles
-  creatorPage: { padding: 16, paddingBottom: 96 },
+  creatorPage: { padding: 20, paddingBottom: 112 },
   creatorPageHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
   creatorKpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginBottom: 24 },
-  creatorKpiCard: { flexBasis: '48%', flexGrow: 1, minHeight: 96, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 12 },
+  creatorKpiCard: { flexBasis: '48%', flexGrow: 1, minHeight: 100, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, padding: 15 },
   creatorKpiLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   creatorKpiValue: { color: COLORS.cyan, fontSize: 20, fontWeight: '900', marginTop: 7 },
   creatorKpiFootnote: { color: COLORS.textDim, fontSize: 9, marginTop: 3 },
   creatorSectionHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 10 },
   creatorEmpty: { color: COLORS.textDim, fontSize: 12, textAlign: 'center', paddingVertical: 28 },
-  creatorContentCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 12, marginBottom: 10 },
+  creatorContentCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, padding: 15, marginBottom: 12 },
   creatorContentHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   creatorPoster: { width: 58, height: 78, borderRadius: 5, backgroundColor: '#edf2ef' },
   creatorContentInfo: { flex: 1, minWidth: 0 },
@@ -2598,14 +2651,14 @@ const styles = StyleSheet.create({
   creatorPayoutInput: { flex: 1, minHeight: 40, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7, color: COLORS.textLight, paddingHorizontal: 10, fontSize: 11 },
   creatorPayoutRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   creatorHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  screenMainTitle: { color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
-  screenSubTitle: { color: COLORS.textDim, fontSize: 12, marginTop: 2 },
-  uploadBtn: { backgroundColor: COLORS.cyan, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
-  uploadBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 12 },
+  screenMainTitle: { color: COLORS.textLight, fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  screenSubTitle: { color: COLORS.textDim, fontSize: 14, marginTop: 4, lineHeight: 20 },
+  uploadBtn: { minHeight: 46, justifyContent: 'center', backgroundColor: COLORS.cyan, paddingHorizontal: 15, paddingVertical: 10, borderRadius: 14 },
+  uploadBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
   metricCard: {
     backgroundColor: COLORS.cardBg,
-    padding: 16,
-    borderRadius: 12,
+    padding: 18,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
     marginTop: 16,
@@ -2641,16 +2694,16 @@ const styles = StyleSheet.create({
   campaignHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   campaignTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
   campaignSub: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
-  advertiserPage: { padding: 16, paddingBottom: 96 },
-  advertiserHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  advertiserPage: { padding: 20, paddingBottom: 112 },
+  advertiserHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 18 },
   advertiserHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  advertiserRefresh: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7 },
-  advertiserSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
-  advertiserSummaryCard: { flexBasis: '47%', flexGrow: 1, minWidth: 128, minHeight: 76, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 11 },
-  advertiserSummaryLabel: { color: COLORS.textDim, fontSize: 9, fontWeight: '700' },
-  advertiserSummaryValue: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 7 },
-  advertiserEmpty: { alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 24, marginTop: 8 },
-  advertiserCampaignCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 14, marginTop: 10 },
+  advertiserRefresh: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 13 },
+  advertiserSummaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  advertiserSummaryCard: { flexBasis: '47%', flexGrow: 1, minWidth: 128, minHeight: 86, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, padding: 14 },
+  advertiserSummaryLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: '700' },
+  advertiserSummaryValue: { color: COLORS.textLight, fontSize: 17, fontWeight: '900', marginTop: 8 },
+  advertiserEmpty: { alignItems: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 24, marginTop: 8 },
+  advertiserCampaignCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 16, marginTop: 12 },
   advertiserCampaignHeading: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   advertiserStatusActive: { color: COLORS.green, backgroundColor: COLORS.greenSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
   advertiserStatusPaused: { color: COLORS.gold, backgroundColor: '#fff3d9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, fontSize: 9, fontWeight: '800' },
@@ -2661,15 +2714,15 @@ const styles = StyleSheet.create({
   advertiserBudgetTrack: { height: 6, backgroundColor: '#e9efeb', borderRadius: 4, overflow: 'hidden', marginTop: 10 },
   advertiserBudgetFill: { height: '100%', backgroundColor: COLORS.cyan, borderRadius: 4 },
   advertiserCampaignStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 12, paddingTop: 12 },
-  advertiserCampaignStatValue: { color: COLORS.textLight, fontSize: 11, fontWeight: '800', marginTop: 4 },
-  creativePicker: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 62, padding: 11, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, backgroundColor: COLORS.cardBg },
+  advertiserCampaignStatValue: { color: COLORS.textLight, fontSize: 12, fontWeight: '800', marginTop: 5 },
+  creativePicker: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 66, padding: 13, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, backgroundColor: COLORS.cardBg },
   creativePickerIcon: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },
   creativePickerTitle: { color: COLORS.textLight, fontSize: 11, fontWeight: '800' },
   creativePickerSub: { color: COLORS.textDim, fontSize: 9, marginTop: 4 },
   creativePickerAction: { color: COLORS.cyan, fontSize: 10, fontWeight: '800' },
   campaignChoiceSection: { marginTop: 16 },
   campaignChoiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 7 },
-  campaignChoice: { minHeight: 37, justifyContent: 'center', paddingHorizontal: 12, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7 },
+  campaignChoice: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 14, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 13 },
   campaignChoiceActive: { borderColor: COLORS.cyan, backgroundColor: COLORS.cyanSoft },
   campaignChoiceLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   campaignChoiceLabelActive: { color: COLORS.cyan },
@@ -2688,7 +2741,7 @@ const styles = StyleSheet.create({
   stepperButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 7 },
   stepperButtonText: { color: COLORS.cyan, fontSize: 20, fontWeight: '700' },
   stepperValue: { minWidth: 70, textAlign: 'center', color: COLORS.textLight, fontSize: 11, fontWeight: '800' },
-  reachEstimate: { alignItems: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 8, padding: 16, marginTop: 18 },
+  reachEstimate: { alignItems: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, padding: 18, marginTop: 18 },
   reachEstimateLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '700' },
   reachEstimateValue: { color: COLORS.cyan, fontSize: 28, fontWeight: '900', marginTop: 5 },
   reachEstimateFootnote: { color: COLORS.textDim, fontSize: 9, marginTop: 5, textAlign: 'center' },
@@ -2708,16 +2761,16 @@ const styles = StyleSheet.create({
   statKey: { color: COLORS.textDim, fontSize: 10, marginTop: 2 },
 
   // Profile View Styles
-  profilePage: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 112 },
-  profilePageHeader: { marginBottom: 18 },
-  profilePageTitle: { color: COLORS.textLight, fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
-  profilePageSubtitle: { color: COLORS.textDim, fontSize: 13, marginTop: 3 },
-  profileHero: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 17 },
+  profilePage: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 120 },
+  profilePageHeader: { marginBottom: 20 },
+  profilePageTitle: { color: COLORS.textLight, fontSize: 30, fontWeight: '900', letterSpacing: -0.8 },
+  profilePageSubtitle: { color: COLORS.textDim, fontSize: 14, marginTop: 4 },
+  profileHero: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 22, padding: 18 },
   profileUserRow: { flexDirection: 'row', alignItems: 'center' },
   avatarCircle: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     backgroundColor: COLORS.cyanSoft,
     borderWidth: 1,
     borderColor: COLORS.cyan,
@@ -2727,41 +2780,47 @@ const styles = StyleSheet.create({
   avatarLetter: { color: COLORS.cyan, fontSize: 23, fontWeight: '900' },
   profileIdentity: { flex: 1, minWidth: 0, marginLeft: 14 },
   profileNameLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  profileName: { flexShrink: 1, color: COLORS.textLight, fontSize: 19, fontWeight: '900' },
+  profileName: { flexShrink: 1, color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
   profileAccountStatus: { flexDirection: 'row', flexShrink: 0, alignItems: 'center', gap: 5, backgroundColor: COLORS.greenSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20 },
   profileAccountStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.green },
   profileAccountStatusText: { color: COLORS.green, fontSize: 9, fontWeight: '800' },
-  profileEmail: { color: COLORS.textDim, fontSize: 12, marginTop: 4 },
+  profileEmail: { color: COLORS.textDim, fontSize: 13, marginTop: 5 },
   profileHeroDivider: { height: 1, backgroundColor: COLORS.cardBorder, marginTop: 17, marginBottom: 14 },
   profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
   profileMetaColumn: { flex: 1, minWidth: 0 },
   profileMetaLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   profileMetaValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', marginTop: 4 },
   profileVipValue: { color: COLORS.gold },
-  profileSection: { marginTop: 25 },
+  profileSection: { marginTop: 24 },
   engagementPreferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 10 },
   profileSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 },
-  profileSectionTitle: { color: COLORS.textLight, fontSize: 17, fontWeight: '800', letterSpacing: 0.1 },
+  profileSectionTitle: { color: COLORS.textLight, fontSize: 19, fontWeight: '800', letterSpacing: -0.2 },
+  profilePrivacyCard: { backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 16, marginTop: 12 },
+  profileAdToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  profileAdCopy: { flex: 1, gap: 4 },
+  profileAdDetailsToggle: { minHeight: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: COLORS.cardBorder, marginTop: 12, paddingTop: 8 },
+  profileAdDetailsText: { color: COLORS.cyan, fontSize: 14, fontWeight: '700' },
+  profileAdDetails: { paddingBottom: 6 },
   profileActiveLabel: { color: COLORS.green, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
   profileRoleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
-  profileRoleCard: { flex: 1, minWidth: 145, minHeight: 96, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 15, padding: 13, justifyContent: 'space-between' },
+  profileRoleCard: { flex: 1, minWidth: 145, minHeight: 100, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 18, padding: 15, justifyContent: 'space-between' },
   profileRoleIcon: { color: COLORS.cyan, fontSize: 19, fontWeight: '900' },
   profileRoleTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800' },
   profileRoleArrow: { color: COLORS.textDim, fontSize: 24, lineHeight: 26 },
   profilePlanGrid: { flexDirection: 'row', gap: 10 },
-  profilePlanCard: { flex: 1, minHeight: 80, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, justifyContent: 'center' },
+  profilePlanCard: { flex: 1, minHeight: 86, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, paddingHorizontal: 15, paddingVertical: 14, justifyContent: 'center' },
   profilePlanName: { color: COLORS.textDim, fontSize: 12, fontWeight: '700' },
   profilePlanPrice: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 5 },
-  profileRefreshButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 12, backgroundColor: COLORS.cyanSoft },
-  profileRefreshText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
+  profileRefreshButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 12, borderRadius: 14, backgroundColor: COLORS.cyanSoft },
+  profileRefreshText: { color: COLORS.cyan, fontSize: 14, fontWeight: '800' },
   profileNotice: { color: COLORS.cyan, fontSize: 12, lineHeight: 18, marginTop: 14 },
-  profileActions: { marginTop: 25, borderTopWidth: 1, borderColor: COLORS.cardBorder },
-  profileActionRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 2 },
-  profileActionTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '700' },
-  engagementActionSub: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
+  profileActions: { marginTop: 24, borderTopWidth: 1, borderColor: COLORS.cardBorder },
+  profileActionRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 2 },
+  profileActionTitle: { color: COLORS.textLight, fontSize: 15, fontWeight: '700' },
+  engagementActionSub: { color: COLORS.textDim, fontSize: 12, lineHeight: 17, marginTop: 4 },
   profileSignOutRow: { marginTop: 1 },
   profileSignOutText: { color: COLORS.danger, fontSize: 14, fontWeight: '700' },
-  engagementPage: { padding: 18, paddingBottom: 40 },
+  engagementPage: { padding: 20, paddingBottom: 44 },
   engagementTabs: { flexDirection: 'row', gap: 7, marginTop: 18, marginBottom: 14 },
   engagementTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 9 },
   engagementTabActive: { borderColor: COLORS.cyan, backgroundColor: COLORS.cyanSoft },
@@ -2846,18 +2905,28 @@ const styles = StyleSheet.create({
   // Bottom Navigation Bar
   bottomNav: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 76,
+    bottom: 10,
+    left: 14,
+    right: 14,
+    height: 72,
     backgroundColor: COLORS.cardBg,
-    borderTopWidth: 1,
+    borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    borderRadius: 24,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
+    paddingHorizontal: 5,
+    elevation: 8,
+    shadowColor: '#21352c',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 5 },
   },
-  navItem: { alignItems: 'center', justifyContent: 'center', minWidth: 56, minHeight: 56, paddingHorizontal: 4 },
-  navIcon: { color: COLORS.textDim, fontSize: 20 },
-  navLabel: { color: COLORS.textDim, fontSize: 12, fontWeight: '600', marginTop: 3 },
+  navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 48, minHeight: 58, paddingHorizontal: 3 },
+  navIconWrap: { minWidth: 42, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
+  navIconWrapActive: { backgroundColor: COLORS.cyanSoft },
+  navIcon: { color: COLORS.textDim, fontSize: 21, lineHeight: 25 },
+  navIconActive: { color: COLORS.cyan, fontWeight: '900' },
+  navLabel: { color: COLORS.textDim, fontSize: 11, fontWeight: '700', marginTop: 2 },
 });

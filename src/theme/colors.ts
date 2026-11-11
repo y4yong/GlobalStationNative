@@ -1,22 +1,22 @@
 export type ColorScheme = 'light' | 'dark';
 
 const LIGHT_COLORS = {
-  bg: '#f5f7f6',
-  cardBg: '#ffffff',
-  cardBorder: '#e1e8e4',
-  cyan: '#176f5a',
-  cyanDark: '#245f50',
-  cyanSoft: '#e8f3ee',
-  gold: '#946318',
-  goldSoft: '#fff3d9',
-  green: '#24734e',
-  greenSoft: '#e7f4eb',
-  greenBtn: '#176f5a',
-  danger: '#a33c45',
-  dangerSoft: '#fbecee',
-  textLight: '#1d2d27',
-  textMuted: '#52635b',
-  textDim: '#708078',
+  bg: '#f6f4ef',
+  cardBg: '#fffefa',
+  cardBorder: '#e8e3d9',
+  cyan: '#286b57',
+  cyanDark: '#1c5745',
+  cyanSoft: '#e8f1eb',
+  gold: '#98692c',
+  goldSoft: '#f8efdf',
+  green: '#286b57',
+  greenSoft: '#e8f1eb',
+  greenBtn: '#286b57',
+  danger: '#a4494b',
+  dangerSoft: '#f8ecea',
+  textLight: '#20322b',
+  textMuted: '#55665d',
+  textDim: '#78847c',
 } as const;
 
 const DARK_COLORS = {
