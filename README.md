@@ -88,6 +88,8 @@ If you're having issues getting the above steps to work, see the [Troubleshootin
 
 # Global Station API
 
+For the production AWS deployment steps (Amplify Hosting, EC2, RDS/PostGIS, S3/CloudFront, networking, and required environment variables), see the [AWS deployment guide](docs/aws-deployment.md).
+
 The mobile app expects the API on port `5000`. In development it uses the host from the Metro bundle URL, which supports an Android emulator, iOS simulator, or a device on the same network. Android emulator builds fall back to `10.0.2.2`; iOS simulator builds fall back to `localhost`. Keep the API and Metro running, and ensure a physical device and the computer running the API/Metro are on the same network. For an Android phone connected by USB, forward both development ports with `adb reverse tcp:8081 tcp:8081` and `adb reverse tcp:5000 tcp:5000`.
 
 From the repository root:

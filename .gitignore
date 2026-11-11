@@ -41,6 +41,12 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Local environment variables (keep example templates in source control)
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.integrations.example
+
 # fastlane
 #
 # It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
