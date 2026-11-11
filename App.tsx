@@ -34,6 +34,7 @@ import { requestViewingLocationPermission } from './src/core/location/viewingLoc
 import { formatDate } from './src/core/formatDate';
 import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
 import { isShortEpisodeDuration } from './src/data/episodeDuration';
+import { getEpisodeNavigation } from './src/data/episodeNavigation';
 
 const Text = ({ style, ...props }: TextProps) => {
   const textStyle = StyleSheet.flatten(style);
@@ -72,9 +73,9 @@ export default function App() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedCreatorSubmission, setSelectedCreatorSubmission] = useState<CreatorSubmission | null>(null);
-  const [selectedEpisode, setSelectedEpisode] = useState('');
   const [resumeAtSeconds, setResumeAtSeconds] = useState(0);
   const [resumeEpisodeId, setResumeEpisodeId] = useState<string | null>(null);
+  const [episodeEnded, setEpisodeEnded] = useState(false);
   const [loadedVideoDuration, setLoadedVideoDuration] = useState<number | null>(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [adBreakPhase, setAdBreakPhase] = useState<'pre-roll' | PlaybackAdBreak | null>(null);
@@ -165,9 +166,9 @@ export default function App() {
       return;
     }
     setSelectedDrama(drama);
-    setSelectedEpisode(episode.title);
     setResumeAtSeconds(resumeAtSeconds);
     setResumeEpisodeId(episode.id);
+    setEpisodeEnded(false);
     setLoadedVideoDuration(null);
     playedAdBreaks.current.clear();
     activeAdBreak.current = 'pre-roll';
@@ -190,6 +191,8 @@ export default function App() {
     activeAdBreak.current = null;
     setAdBreakPhase(null);
   };
+  const episodeNavigation = getEpisodeNavigation(selectedDrama?.episodes ?? [], resumeEpisodeId);
+  const { currentIndex: currentEpisodeIndex, current: currentEpisode, next: nextEpisode } = episodeNavigation;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -205,7 +208,7 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={styles.topHeader}>
             <TouchableOpacity style={styles.headerBackButton} onPress={() => setCurrentScreen('Tabs')}>
-              <Text style={styles.backBtnText}>‹ Back to Home</Text>
+              <Text style={styles.backBtnText}>‹ Back</Text>
             </TouchableOpacity>
           </View>
 
@@ -260,9 +263,10 @@ export default function App() {
                 ? `Episodes · ${selectedDrama.episodes.length} so far`
                 : 'Episodes'}
             </Text>
-            {selectedDrama.episodes.map((ep) => (
+            {selectedDrama.episodes.map((ep, index) => (
               <View key={ep.id} style={styles.episodeCard}>
                 <View style={{ flex: 1 }}>
+                  {selectedDrama.contentType === 'SERIES' && <Text style={styles.episodeNumber}>EPISODE {index + 1}</Text>}
                   <View style={styles.episodeTitleRow}>
                     <Text style={styles.episodeTitle}>{ep.title}</Text>
                     {ep.requiresVip && <Text style={styles.vipTitleLabel}>VIP</Text>}
@@ -295,12 +299,14 @@ export default function App() {
             adFullscreen && styles.videoStageFullscreen,
           ]}>
             <ProtectedVideoPlayer
-              episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
+              key={currentEpisode?.id}
+              episodeId={currentEpisode?.id ?? ''}
               paused={adBreakPhase !== null}
               startTime={resumeAtSeconds}
               onDurationChange={setLoadedVideoDuration}
               shareViewingLocation={profile.locationAnalyticsEnabled}
               onPlaybackProgress={handlePlaybackProgress}
+              onPlaybackEnded={() => setEpisodeEnded(true)}
             />
             {adBreakPhase !== null && <AdBreak
               key={adBreakPhase}
@@ -314,7 +320,28 @@ export default function App() {
           </View>
           {!adFullscreen && <ScrollView style={styles.playerInfoScroll} contentContainerStyle={styles.playerInfoContent}>
             <Text style={styles.playerVideoTitle}>{selectedDrama.title}</Text>
-            <Text style={styles.playerEpisodeTitle}>{selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)?.title ?? selectedEpisode}</Text>
+            <Text style={styles.playerEpisodeTitle}>
+              {selectedDrama.contentType === 'SERIES'
+                ? `Episode ${currentEpisodeIndex + 1} of ${selectedDrama.episodes.length} · ${currentEpisode?.title ?? ''}`
+                : currentEpisode?.title}
+            </Text>
+            {selectedDrama.contentType === 'SERIES' && nextEpisode && (
+              <View style={styles.nextEpisodeCard}>
+                <View style={styles.nextEpisodeCopy}>
+                  <Text style={styles.nextEpisodeEyebrow}>{episodeEnded ? 'EPISODE COMPLETE' : 'UP NEXT'}</Text>
+                  <Text numberOfLines={1} style={styles.nextEpisodeTitle}>Episode {currentEpisodeIndex + 2} · {nextEpisode.title}</Text>
+                  <Text style={styles.nextEpisodeMeta}>{nextEpisode.duration} · {nextEpisode.rating}</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Play episode ${currentEpisodeIndex + 2}`}
+                  style={styles.nextEpisodeButton}
+                  onPress={() => startPlayback(selectedDrama, undefined, 0, nextEpisode.id)}
+                >
+                  <Text style={styles.nextEpisodeButtonText}>{episodeEnded ? 'Continue' : 'Next'} ›</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             <View style={styles.publisherRow}>
               <View style={styles.publisherAvatar}>
                 <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'CINEVA').trim().slice(0, 1).toUpperCase()}</Text>
@@ -368,7 +395,7 @@ export default function App() {
             };
             startPlayback(drama, item.episodeTitle, item.resumeAtSeconds, item.episodeId);
           }} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
-          {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} onIndustryHub={() => setCurrentScreen('IndustryHub')} />}
+          {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} />}
           {activeTab === 'Creator' && <CreatorTabView
             creatorName={profile.name}
             onUpload={() => setCurrentScreen('Upload')}
@@ -409,17 +436,34 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const [signupAdPersonalization, setSignupAdPersonalization] = useState(false);
+  const [signupAdAgeRange, setSignupAdAgeRange] = useState('');
+  const [signupAdGender, setSignupAdGender] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   async function submit() {
+    if (registering && signupAdPersonalization && (!signupAdAgeRange || !signupAdGender)) {
+      setError('Choose an age range and gender, or leave personalized ads turned off.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const profile = registering
-        ? await registerViewer(name, email, password, referralCode.trim() || undefined)
+        ? await registerViewer(
+          name,
+          email,
+          password,
+          referralCode.trim() || undefined,
+          {
+            enabled: signupAdPersonalization,
+            ageRange: signupAdPersonalization ? signupAdAgeRange as NonNullable<ViewerProfile['adAgeRange']> : null,
+            gender: signupAdPersonalization ? signupAdGender as NonNullable<ViewerProfile['adGender']> : null,
+          },
+        )
         : await loginViewer(email, password);
       onAuthenticated(profile);
     } catch (requestError) {
@@ -440,10 +484,33 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
         <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
         {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
+        {registering && <View style={styles.signupAdPreferences}>
+          <Text style={styles.signupAdTitle}>Personalized ads</Text>
+          <Text style={styles.signupAdDescription}>Optional. Choose whether CINEVA may use your age range and gender to tailor ads. You can change this anytime in Profile.</Text>
+          <View style={styles.signupAdConsentRow}>
+            <Text style={styles.signupAdConsentText}>Allow age and gender ad personalization</Text>
+            <Switch
+              accessibilityLabel="Allow age and gender ad personalization during signup"
+              value={signupAdPersonalization}
+              onValueChange={setSignupAdPersonalization}
+              trackColor={{ false: '#dce5df', true: COLORS.cyanDark }}
+              thumbColor={signupAdPersonalization ? COLORS.cyan : '#cbd5e1'}
+            />
+          </View>
+          {signupAdPersonalization && <>
+            <SelectField label="Age range" value={signupAdAgeRange || 'Select age range'} options={['18-24', '25-34', '35-44', '45+']} onChange={setSignupAdAgeRange} />
+            <SelectField label="Gender" value={signupAdGender || 'Select gender'} options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']} onChange={setSignupAdGender} />
+          </>}
+        </View>}
         {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
         {!!error && <Text style={{ color: COLORS.danger, marginTop: 14 }}>{error}</Text>}
         <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={() => {
           if (registering) {
+            if (signupAdPersonalization && (!signupAdAgeRange || !signupAdGender)) {
+              setError('Choose an age range and gender, or leave personalized ads turned off.');
+              return;
+            }
+            setError('');
             setTermsAccepted(false);
             setTermsVisible(true);
           } else {
@@ -587,10 +654,13 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
       <View style={styles.brandHeader}>
-        <Text style={styles.brandTitle}>CINEVA</Text>
+        <View>
+          <Text style={styles.brandTitle}>CINEVA</Text>
+          <Text style={styles.brandTagline}>MALAYSIAN STORIES. MADE TO BINGE.</Text>
+        </View>
         <View style={styles.headerRightIcons}>
-          <TouchableOpacity onPress={onSearch}><Text style={styles.iconTxt}>⚲</Text></TouchableOpacity>
-          <TouchableOpacity onPress={onProfile}><Text style={styles.iconTxt}>👤</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Search" style={styles.headerIconButton} onPress={onSearch}><Text style={styles.iconTxt}>⌕</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Profile" style={styles.headerIconButton} onPress={onProfile}><Text style={styles.iconTxt}>◉</Text></TouchableOpacity>
         </View>
       </View>
 
@@ -612,14 +682,21 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 
       {/* Hero Banner */}
       {visibleDramas[0] && <View style={styles.heroCard}>
-        <PosterImage uri={visibleDramas[0].posterHorizontalUrl ?? visibleDramas[0].posterUrl} title={visibleDramas[0].title} style={styles.heroPosterImage} />
+        <View style={styles.heroArtwork}>
+          <PosterImage uri={visibleDramas[0].posterUrl ?? visibleDramas[0].posterHorizontalUrl} title={visibleDramas[0].title} style={styles.heroPosterImage} />
+          <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{visibleDramas[0].contentType === 'SERIES' ? 'FEATURED SERIES' : 'FEATURED FILM'}</Text></View>
+        </View>
         <View style={styles.heroGradient}>
+          <Text style={styles.heroEyebrow}>{visibleDramas[0].category.toUpperCase()}</Text>
           <Text style={styles.heroDramaTitle}>{visibleDramas[0].title}</Text>
-          <Text style={styles.heroSub}>{visibleDramas[0].genre} • {visibleDramas[0].rating}</Text>
+          <Text numberOfLines={3} style={styles.heroSub}>{visibleDramas[0].genre} · {visibleDramas[0].rating}{visibleDramas[0].contentType === 'SERIES' ? ` · ${visibleDramas[0].episodes.length} episodes` : ''}</Text>
 
           <View style={styles.heroBtnRow}>
             <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(visibleDramas[0])}>
-              <Text style={styles.cyanActionBtnText}>▶ Watch Episode 1</Text>
+              <Text style={styles.cyanActionBtnText}>▶  {visibleDramas[0].contentType === 'SERIES' ? 'Watch Episode 1' : 'Watch now'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.heroDetailsBtn} onPress={() => onSelect(visibleDramas[0])}>
+              <Text style={styles.heroDetailsText}>View details  ›</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -655,7 +732,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 }
 
 // --- TAB 2: SEARCH & FILTER ---
-function SearchTabView({ dramas, loading, onSelect, onIndustryHub }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void; onIndustryHub: () => void }) {
+function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void }) {
   const [query, setQuery] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(true);
   const [selectedGenre, setSelectedGenre] = useState('All');
@@ -708,11 +785,7 @@ function SearchTabView({ dramas, loading, onSelect, onIndustryHub }: { dramas: D
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
       <Text style={styles.screenMainTitle}>Discover</Text>
-      <Text style={styles.screenSubTitle}>Find your next story, or meet the people bringing it to screen.</Text>
-      <TouchableOpacity style={[styles.creatorContentCard, { marginTop: 16, marginBottom: 8 }]} onPress={onIndustryHub}>
-        <Text style={styles.searchResultTitle}>Industry Hub · Connect, invest & create</Text>
-        <Text style={styles.creatorMeta}>Explore Malaysian stories, creator pitches, and regional partners  ›</Text>
-      </TouchableOpacity>
+      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, or type.</Text>
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
@@ -2503,14 +2576,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 4,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 8,
   },
-  brandTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textLight, letterSpacing: 1.1 },
-  authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 21, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  brandTitle: { fontSize: 23, fontWeight: '900', color: COLORS.textLight, letterSpacing: 0.3 },
+  brandTagline: { color: COLORS.textDim, fontSize: 9, fontWeight: '700', letterSpacing: 1.1, marginTop: 1 },
+  authLogo: { alignSelf: 'center', color: COLORS.textLight, fontSize: 30, fontWeight: '900', letterSpacing: 0.4, marginBottom: 8 },
+  signupAdPreferences: { marginTop: 18, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  signupAdTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
+  signupAdDescription: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 5 },
+  signupAdConsentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 10 },
+  signupAdConsentText: { flex: 1, color: COLORS.textLight, fontSize: 12, fontWeight: '600' },
   headerRightIcons: { flexDirection: 'row', gap: 8 },
-  iconTxt: { color: COLORS.textLight, fontSize: 20, minWidth: 44, minHeight: 44, textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 7, paddingVertical: 9 },
+  headerIconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
+  iconTxt: { color: COLORS.textLight, fontSize: 22, textAlign: 'center' },
 
   homeLaneRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   homeLaneChip: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 19, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
@@ -2533,17 +2613,21 @@ const styles = StyleSheet.create({
   chipText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#ffffff', fontWeight: '800' },
 
-  heroCard: { marginHorizontal: 18, marginTop: 8, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder },
+  heroCard: { flexDirection: 'row', marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  heroArtwork: { width: '42%', height: 260, position: 'relative', backgroundColor: COLORS.cardBorder },
   heroPosterImage: {
     width: '100%',
-    height: 150,
+    height: 260,
     backgroundColor: COLORS.cardBg,
-    borderBottomWidth: 1,
-    borderColor: COLORS.cardBorder,
   },
+  heroBadge: { position: 'absolute', top: 10, left: 9, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 5, backgroundColor: 'rgba(20,35,29,0.88)' },
+  heroBadgeText: { color: '#ffffff', fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   heroGradient: {
     backgroundColor: COLORS.cardBg,
-    padding: 14,
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 16,
   },
   heroPosterPlaceholder: {
     backgroundColor: COLORS.cardBg,
@@ -2572,18 +2656,21 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  heroDramaTitle: { color: COLORS.textLight, fontSize: 18, fontWeight: '800' },
-  heroSub: { color: COLORS.textMuted, fontSize: 13, marginTop: 4 },
-  heroBtnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  heroEyebrow: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 0.9, marginBottom: 7 },
+  heroDramaTitle: { color: COLORS.textLight, fontSize: 20, lineHeight: 24, fontWeight: '900' },
+  heroSub: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 7 },
+  heroBtnRow: { alignItems: 'flex-start', gap: 6, marginTop: 14 },
   cyanActionBtn: {
     backgroundColor: COLORS.cyan,
-    minHeight: 46,
+    minHeight: 42,
     justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 9,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
   },
-  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
+  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 11 },
+  heroDetailsBtn: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 2 },
+  heroDetailsText: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700' },
   listActionBtn: {
     backgroundColor: COLORS.cardBg,
     paddingVertical: 10,
@@ -2659,6 +2746,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   episodeTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  episodeNumber: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginBottom: 4 },
   episodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   cyanSmallBtn: {
     backgroundColor: COLORS.cyan,
@@ -2677,6 +2765,13 @@ const styles = StyleSheet.create({
   playerInfoContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 },
   playerVideoTitle: { color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
   playerEpisodeTitle: { color: COLORS.textMuted, fontSize: 14, fontWeight: '600', marginTop: 5 },
+  nextEpisodeCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  nextEpisodeCopy: { flex: 1, minWidth: 0 },
+  nextEpisodeEyebrow: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  nextEpisodeTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', marginTop: 4 },
+  nextEpisodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
+  nextEpisodeButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 8, backgroundColor: COLORS.cyan },
+  nextEpisodeButtonText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   publisherRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   publisherAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cyan },
   publisherAvatarText: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },

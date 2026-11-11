@@ -12,10 +12,29 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
 });
+export const registerRequestSchema = registerSchema.extend({
+  referralCode: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/).optional(),
+  adPersonalizationEnabled: z.boolean().default(false),
+  adAgeRange: z.enum(['18-24', '25-34', '35-44', '45+']).nullable().default(null),
+  adGender: z.enum(['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']).nullable().default(null),
+}).superRefine((input, context) => {
+  if (!input.adPersonalizationEnabled) return;
+  if (!input.adAgeRange) {
+    context.addIssue({ code: 'custom', path: ['adAgeRange'], message: 'Choose an age range to enable personalized ads.' });
+  }
+  if (!input.adGender) {
+    context.addIssue({ code: 'custom', path: ['adGender'], message: 'Choose a gender option to enable personalized ads.' });
+  }
+});
 export type UserRole = 'VIEWER' | 'CREATOR' | 'ADVERTISER' | 'ADMIN';
 export interface LoginResult { token: string; role: UserRole; roles: UserRole[]; expiresAt: string }
 export interface AuthenticatedUser { id: string; name: string; email: string; role: UserRole; roles: UserRole[]; isVip: boolean; locationAnalyticsEnabled: boolean; adPersonalizationEnabled: boolean; adAgeRange: string | null; adGender: string | null }
 interface AuthenticatedRequest extends Request { authenticatedUser?: AuthenticatedUser }
+interface RegistrationAdPreferences {
+  enabled: boolean;
+  ageRange: '18-24' | '25-34' | '35-44' | '45+' | null;
+  gender: 'WOMAN' | 'MAN' | 'NON_BINARY' | 'PREFER_NOT_TO_SAY' | null;
+}
 
 const sessionLifetimeSeconds = 60 * 60 * 24 * 7;
 
@@ -29,14 +48,30 @@ function createSession(user: Pick<AuthenticatedUser, 'id' | 'role'> & { roles?: 
   };
 }
 
-export async function register(name: string, email: string, password: string, referralCode?: string): Promise<LoginResult | null> {
+export async function register(
+  name: string,
+  email: string,
+  password: string,
+  referralCode?: string,
+  adPreferences: RegistrationAdPreferences = { enabled: false, ageRange: null, gender: null },
+): Promise<LoginResult | null> {
   const passwordHash = await bcrypt.hash(password, 12);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows } = await client.query<{ id: string; role: UserRole }>(
-      'INSERT INTO users (name, email, password_hash, role) VALUES ($1, lower($2), $3, $4) ON CONFLICT (email) DO NOTHING RETURNING id, role',
-      [name.trim(), email, passwordHash, 'VIEWER'],
+      `INSERT INTO users (
+        name, email, password_hash, role,
+        ad_personalization_enabled, ad_age_range, ad_gender
+      ) VALUES ($1, lower($2), $3, $4, $5, $6, $7)
+      ON CONFLICT (email) DO NOTHING
+      RETURNING id, role`,
+      [
+        name.trim(), email, passwordHash, 'VIEWER',
+        adPreferences.enabled,
+        adPreferences.enabled ? adPreferences.ageRange : null,
+        adPreferences.enabled ? adPreferences.gender : null,
+      ],
     );
     if (!rows[0]) {
       await client.query('ROLLBACK');

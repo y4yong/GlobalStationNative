@@ -132,7 +132,7 @@ Migration 010 adds an in-app notification inbox, channel preferences, audience-t
 
 Referral and promotion rewards are configuration and ledger records only: codes do not yet discount Stripe checkouts or grant subscription time/credit automatically. Qualification rules, reward amounts, approval, and fulfillment must be implemented before offering incentives. Push-token registration/delivery, email delivery, SMS, WhatsApp, campaign analytics, and notification UI are future integrations; channel preferences default to opt-in only for in-app messages. No third-party messaging provider is required or contacted by this foundation.
 
-The mobile viewer flow supports account registration and sign-in through the API. Every new account starts as a Basic user (Viewer); Creator and Advertiser roles can be added from the profile after reviewing and confirming the change. The current API does not include a first-administrator provisioning command; create an administrator through a separately secured operational process before using the admin console on a fresh database.
+The mobile viewer flow supports account registration and sign-in through the API. Sign-up includes an optional, off-by-default ad-personalization consent; only when enabled must the user choose an age range and gender. Those choices are saved with the new account and can be reviewed or changed later in Profile. Every new account starts as a Basic user (Viewer); Creator and Advertiser roles can be added from the profile after reviewing and confirming the change. The current API does not include a first-administrator provisioning command; create an administrator through a separately secured operational process before using the admin console on a fresh database.
 
 ## Admin Web
 

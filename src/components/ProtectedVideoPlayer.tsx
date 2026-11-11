@@ -14,9 +14,10 @@ interface ProtectedVideoPlayerProps {
   onDurationChange?: (duration: number) => void;
   shareViewingLocation: boolean;
   onPlaybackProgress?: (currentTime: number, duration: number) => void;
+  onPlaybackEnded?: () => void;
 }
 
-export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurationChange, shareViewingLocation, onPlaybackProgress }: ProtectedVideoPlayerProps) {
+export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurationChange, shareViewingLocation, onPlaybackProgress, onPlaybackEnded }: ProtectedVideoPlayerProps) {
   const [stream, setStream] = useState<Awaited<ReturnType<typeof authorizePlayback>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const player = useRef<VideoRef>(null);
@@ -129,7 +130,10 @@ export function ProtectedVideoPlayer({ episodeId, paused, startTime = 0, onDurat
       trackProgress(currentTime);
       onPlaybackProgress?.(currentTime, duration.current);
     }}
-    onEnd={() => flushProgress(true, duration.current)}
+    onEnd={() => {
+      flushProgress(true, duration.current);
+      onPlaybackEnded?.();
+    }}
     onError={() => setError('Playback failed. Check the media URL and try again.')}
   />;
 }

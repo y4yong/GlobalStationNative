@@ -86,9 +86,29 @@ export async function loginViewer(email: string, password: string): Promise<View
   return getViewerProfile();
 }
 
-export async function registerViewer(name: string, email: string, password: string, referralCode?: string): Promise<ViewerProfile> {
+export async function registerViewer(
+  name: string,
+  email: string,
+  password: string,
+  referralCode?: string,
+  adPreferences: {
+    enabled: boolean;
+    ageRange: ViewerProfile['adAgeRange'];
+    gender: ViewerProfile['adGender'];
+  } = { enabled: false, ageRange: null, gender: null },
+): Promise<ViewerProfile> {
   const session = await request<SessionResponse>('/auth/register', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password, referralCode }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      email,
+      password,
+      referralCode,
+      adPersonalizationEnabled: adPreferences.enabled,
+      adAgeRange: adPreferences.ageRange,
+      adGender: adPreferences.gender,
+    }),
   });
   await persistSession(session);
   return getViewerProfile();

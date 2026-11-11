@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
 import { contentCategories, contentGenreSchema } from './contentOptions.js';
-import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
+import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerRequestSchema, requireAuthenticated, upgradeRole } from './auth.js';
 import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
 import { listContinueWatching, listDramas } from './catalogRepository.js';
@@ -337,14 +337,22 @@ app.post('/api/v1/auth/login', async (request, response, next) => {
 
 app.post('/api/v1/auth/register', async (request, response, next) => {
   try {
-    const input = registerSchema.extend({
-      referralCode: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/).optional(),
-    }).safeParse(request.body);
+    const input = registerRequestSchema.safeParse(request.body);
     if (!input.success) {
-      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A name, valid email, and password of at least 8 characters are required.' });
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide valid account details and complete age and gender choices when enabling ad personalization.' });
       return;
     }
-    const result = await register(input.data.name, input.data.email, input.data.password, input.data.referralCode);
+    const result = await register(
+      input.data.name,
+      input.data.email,
+      input.data.password,
+      input.data.referralCode,
+      {
+        enabled: input.data.adPersonalizationEnabled,
+        ageRange: input.data.adAgeRange,
+        gender: input.data.adGender,
+      },
+    );
     if (!result) {
       response.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'An account already exists for this email.' });
       return;

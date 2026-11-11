@@ -160,7 +160,6 @@ function App() {
         <div className="sidebar-brand">
           <img className="brand-logo" src={cinevaLogo} alt="CINEVA" />
           <div>
-            <strong>CINEVA</strong>
             <small>CONTROL ROOM</small>
           </div>
           <button
