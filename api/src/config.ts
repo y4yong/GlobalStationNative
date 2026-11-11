@@ -11,6 +11,7 @@ const envSchema = z.object({
   MEDIA_STORAGE_DRIVER: z.enum(['local', 's3']).default(process.env.NODE_ENV === 'production' ? 's3' : 'local'),
   MEDIA_LOCAL_DIR: z.string().default('./uploads'),
   AWS_REGION: z.string().optional(),
+  BEDROCK_STORY_MODEL_ID: z.string().trim().min(1).optional(),
   AWS_S3_BUCKET: z.string().optional(),
   CLOUDFRONT_DOMAIN: z.string().optional(),
   CLOUDFRONT_KEY_PAIR_ID: z.string().optional(),

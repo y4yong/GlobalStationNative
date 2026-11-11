@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 180" role="img" aria-labelledby="title">
+  <title id="title">CINEVA</title>
+  <rect width="420" height="180" rx="28" fill="#ffffff"/>
+  <circle cx="92" cy="90" r="52" fill="#176f5a"/>
+  <path d="M108 60 65 90l43 30z" fill="#ffffff"/>
+  <text x="158" y="113" fill="#1d2d27" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" letter-spacing="2">CINEVA</text>
+</svg>

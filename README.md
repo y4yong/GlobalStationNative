@@ -86,7 +86,7 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
-# Global Station API
+# CINEVA API
 
 The mobile app expects the API on port `5000`. In development it uses the host from the Metro bundle URL, which supports an Android emulator, iOS simulator, or a device on the same network. Android emulator builds fall back to `10.0.2.2`; iOS simulator builds fall back to `localhost`. Keep the API and Metro running, and ensure a physical device and the computer running the API/Metro are on the same network. For an Android phone connected by USB, forward both development ports with `adb reverse tcp:8081 tcp:8081` and `adb reverse tcp:5000 tcp:5000`.
 
@@ -105,6 +105,12 @@ The API uses PostgreSQL with PostGIS for geography and location rules. Install P
 Media files are stored outside PostgreSQL. The API defaults to `MEDIA_STORAGE_DRIVER=local` outside production and streams uploads into `api/uploads/`, serving them under `/uploads/`; set `PUBLIC_API_URL` to an address reachable by clients such as an emulator when needed. Set `MEDIA_STORAGE_DRIVER=s3` to use direct S3 presigned uploads. Production defaults to S3, and should use an IAM role or other standard AWS SDK credentials plus a private bucket. PostgreSQL stores only media URL references. Local disk storage is for development and is not durable or horizontally shared.
 
 Content submissions include separate vertical and horizontal poster images and support selecting multiple genres. Vertical artwork is used for catalog cards and detail views; horizontal artwork is used for the mobile Home featured banner, which falls back to the vertical image for older content. The Home feed also groups content into Trending Now (most distinct playback sessions in the last 30 days), Original Series (series content), and New Releases (most recently created content).
+
+## Industry Hub
+
+The mobile Discover screen links to an opt-in Industry Hub for creator and industry profiles, connection requests, moderated project/script/IP pitches, and funding-interest inquiries. Creators can submit vertical-series pitches; administrators review them under **Projects & pitches** in the admin console. An inquiry is not an investment transaction and does not transfer or hold funds.
+
+`npm run db:migrate` applies migration 018 for the Industry Hub. AI story ideas are optional and require `AWS_REGION` (or `AWS_DEFAULT_REGION`), `BEDROCK_STORY_MODEL_ID`, and AWS SDK credentials with permission to invoke the selected Bedrock model. The AI action reports a clear configuration error when unavailable. Project subtitle, dubbing, localization, licensing, and OTT fields describe partner needs; they do not enable subtitle tracks, dubbing playback, or distribution integrations. Coin purchases and coin-based episode unlocks are not enabled; the existing VIP and ad-supported viewing options remain.
 
 ## External Services
 

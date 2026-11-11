@@ -39,7 +39,7 @@ try {
   for (const statement of viewerLocationRegionsMigration.split(';').map((part) => part.trim()).filter(Boolean)) {
     await pool.query(statement);
   }
-  for (const migrationName of ['015_schema_reconciliation.sql', '016_ad_targeting_and_qualified_impressions.sql', '017_malaysia_state_ad_targeting.sql']) {
+  for (const migrationName of ['015_schema_reconciliation.sql', '016_ad_targeting_and_qualified_impressions.sql', '017_malaysia_state_ad_targeting.sql', '018_industry_marketplace.sql']) {
     const migrationPath = fileURLToPath(new URL(`../sql/${migrationName}`, import.meta.url));
     const migration = await readFile(path.resolve(migrationPath), 'utf8');
     for (const statement of migration.split(';').map((part) => part.trim()).filter(Boolean)) {

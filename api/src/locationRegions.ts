@@ -40,7 +40,7 @@ export function lookupViewerRegion(latitude: number, longitude: number) {
         format: 'jsonv2', addressdetails: '1', zoom: '10', lat: String(lat), lon: String(lon),
       }).toString();
       const response = await fetch(endpoint, {
-        headers: { 'User-Agent': 'GlobalStationNative/1.0 (viewer region analytics)', 'Accept-Language': 'en' },
+        headers: { 'User-Agent': 'CINEVA/1.0 (viewer region analytics)', 'Accept-Language': 'en' },
         signal: AbortSignal.timeout(8000),
       });
       if (!response.ok) throw new Error(`Geocoder returned ${response.status}`);

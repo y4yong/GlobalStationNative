@@ -276,6 +276,99 @@ export interface ContinueWatchingItem {
   timeLeft: string;
 }
 
+export type IndustryRole = 'CREATOR' | 'ADVERTISER' | 'VIEWER' | 'ADMIN';
+export type MarketplaceProjectKind = 'PROJECT' | 'SCRIPT' | 'IP' | 'TALENT';
+export type MarketplaceProjectFormat = 'VERTICAL_SERIES' | 'SHORT_FILM' | 'FEATURE_FILM' | 'OTHER';
+export type MarketplaceProjectStage = 'IDEA' | 'SCRIPT' | 'DEVELOPMENT' | 'PRODUCTION' | 'POST_PRODUCTION';
+export type MarketplaceNeed =
+  | 'CO_PRODUCTION'
+  | 'TALENT'
+  | 'FUNDING'
+  | 'SUBTITLING'
+  | 'DUBBING'
+  | 'LOCAL_ADAPTATION'
+  | 'LICENSING'
+  | 'OTT_DISTRIBUTION';
+
+export interface IndustryProfile {
+  id: string;
+  organization: string;
+  industryRole: string;
+  bio: string;
+  region: string;
+}
+
+export interface IndustryPerson extends IndustryProfile {
+  name: string;
+  roles: IndustryRole[];
+  connectionId: string | null;
+  connectionStatus: 'PENDING' | 'ACCEPTED' | 'DECLINED' | null;
+  connectionDirection: 'INCOMING' | 'OUTGOING' | null;
+}
+
+export interface IndustryConnection {
+  id: string;
+  requesterId: string;
+  recipientId: string;
+  peerId: string;
+  peerName: string;
+  organization: string | null;
+  industryRole: string | null;
+  message: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
+  createdAt: string;
+}
+
+export interface MarketplaceProject {
+  id: string;
+  creatorId: string;
+  title: string;
+  summary: string;
+  kind: MarketplaceProjectKind;
+  format: MarketplaceProjectFormat;
+  category: string;
+  stage: MarketplaceProjectStage;
+  seeking: MarketplaceNeed[];
+  regions: string[];
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
+  investmentTarget: string | number | null;
+  status: 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
+  createdAt: string;
+  creatorName?: string;
+  organization?: string;
+  hasExpressedInterest?: boolean;
+  interestCount?: number;
+}
+
+export interface MarketplaceInterest {
+  id: string;
+  projectId: string;
+  projectTitle: string;
+  creatorId: string;
+  investorId: string;
+  investorName: string;
+  amount: string | number | null;
+  message: string;
+  status: 'PENDING' | 'ACKNOWLEDGED' | 'DECLINED';
+  createdAt: string;
+  isOwner: boolean;
+}
+
+export interface CreateMarketplaceProject {
+  title: string;
+  summary: string;
+  kind: MarketplaceProjectKind;
+  format: MarketplaceProjectFormat;
+  category: string;
+  stage: MarketplaceProjectStage;
+  seeking: MarketplaceNeed[];
+  regions: string[];
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
+  investmentTarget: number | null;
+}
+
 export interface AdvertiserCampaign {
   id: string;
   campaignName: string;
@@ -309,6 +402,82 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
   return history
     .filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0)
     .map((item) => ({ ...item, posterUrl: normalizeUrl(item.posterUrl) ?? undefined }));
+}
+
+export function getIndustryProfile(): Promise<IndustryProfile | null> {
+  return request<IndustryProfile | null>('/industry/profile');
+}
+
+export function saveIndustryProfile(input: Omit<IndustryProfile, 'id'>): Promise<IndustryProfile> {
+  return request<IndustryProfile>('/industry/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function getIndustryPeople(): Promise<IndustryPerson[]> {
+  return request<IndustryPerson[]>('/industry/people');
+}
+
+export function getIndustryConnections(): Promise<IndustryConnection[]> {
+  return request<IndustryConnection[]>('/industry/connections');
+}
+
+export function createIndustryConnection(recipientId: string, message: string): Promise<IndustryConnection> {
+  return request<IndustryConnection>('/industry/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipientId, message }),
+  });
+}
+
+export function respondToIndustryConnection(id: string, status: 'ACCEPTED' | 'DECLINED'): Promise<IndustryConnection> {
+  return request<IndustryConnection>(`/industry/connections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function getMarketplaceProjects(view: 'DISCOVER' | 'MINE' | 'INVEST' = 'DISCOVER'): Promise<MarketplaceProject[]> {
+  return request<MarketplaceProject[]>(`/industry/projects?view=${encodeURIComponent(view)}`);
+}
+
+export function createMarketplaceProject(input: CreateMarketplaceProject): Promise<MarketplaceProject> {
+  return request<MarketplaceProject>('/industry/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function generateStoryIdea(prompt: string): Promise<{ title: string; summary: string }> {
+  return request<{ title: string; summary: string }>('/industry/projects/story-idea', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export function getMarketplaceInterests(): Promise<MarketplaceInterest[]> {
+  return request<MarketplaceInterest[]>('/industry/interests');
+}
+
+export function createMarketplaceInterest(projectId: string, amount: number | null, message: string): Promise<MarketplaceInterest> {
+  return request<MarketplaceInterest>(`/industry/projects/${encodeURIComponent(projectId)}/interests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, message }),
+  });
+}
+
+export function updateMarketplaceInterest(id: string, status: 'ACKNOWLEDGED' | 'DECLINED'): Promise<MarketplaceInterest> {
+  return request<MarketplaceInterest>(`/industry/interests/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {

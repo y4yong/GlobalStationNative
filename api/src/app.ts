@@ -14,6 +14,20 @@ import { lookupViewerRegion } from './locationRegions.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
 import { createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
 import {
+  createIndustryConnection,
+  createMarketplaceInterest,
+  createMarketplaceProject,
+  getIndustryProfile,
+  listIndustryConnections,
+  listIndustryPeople,
+  listMarketplaceInterests,
+  listMarketplaceProjects,
+  respondToIndustryConnection,
+  saveIndustryProfile,
+  updateMarketplaceInterest,
+} from './industryMarketplace.js';
+import { generateStoryIdea } from './storyGeneration.js';
+import {
   createEngagementCode,
   createNotificationCampaign,
   cancelNotificationCampaign,
@@ -106,6 +120,198 @@ app.get('/api/v1/dramas', async (_request, response, next) => {
 app.get('/api/v1/watch-history', requireAuthenticated, async (request, response, next) => {
   try {
     response.json(await listContinueWatching(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/profile', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await getIndustryProfile(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/v1/industry/profile', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({
+    organization: z.string().trim().max(160).default(''),
+    industryRole: z.string().trim().min(2).max(100),
+    bio: z.string().trim().max(1000).default(''),
+    region: z.string().trim().min(2).max(80).default('Malaysia'),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide an industry role and valid profile details.' });
+    return;
+  }
+  try {
+    response.json(await saveIndustryProfile(getAuthenticatedUser(request).id, input.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/people', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listIndustryPeople(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/connections', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listIndustryConnections(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/connections', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({
+    recipientId: z.string().uuid(),
+    message: z.string().trim().max(500).default(''),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid member and connection message.' });
+    return;
+  }
+  try {
+    const connection = await createIndustryConnection(getAuthenticatedUser(request).id, input.data.recipientId, input.data.message);
+    if (!connection) {
+      response.status(409).json({ error: 'CONNECTION_UNAVAILABLE', message: 'This member is unavailable or a connection already exists.' });
+      return;
+    }
+    response.status(201).json(connection);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/industry/connections/:id', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['ACCEPTED', 'DECLINED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid connection and response.' });
+    return;
+  }
+  try {
+    const connection = await respondToIndustryConnection(getAuthenticatedUser(request).id, id.data, input.data.status);
+    if (!connection) {
+      response.status(404).json({ error: 'CONNECTION_NOT_FOUND', message: 'This pending request is not available to your account.' });
+      return;
+    }
+    response.json(connection);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/projects', requireAuthenticated, async (request, response, next) => {
+  const view = z.enum(['DISCOVER', 'MINE', 'INVEST']).safeParse(request.query.view ?? 'DISCOVER');
+  if (!view.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid project view.' });
+    return;
+  }
+  try {
+    response.json(await listMarketplaceProjects(getAuthenticatedUser(request).id, view.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects', requireAuthenticated, async (request, response, next) => {
+  const user = getAuthenticatedUser(request);
+  if (!hasRole(user, 'CREATOR') && user.role !== 'ADMIN') {
+    response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED', message: 'Register as a creator before publishing a project pitch.' });
+    return;
+  }
+  const input = z.object({
+    title: z.string().trim().min(3).max(160),
+    summary: z.string().trim().min(20).max(3000),
+    kind: z.enum(['PROJECT', 'SCRIPT', 'IP', 'TALENT']),
+    format: z.enum(['VERTICAL_SERIES', 'SHORT_FILM', 'FEATURE_FILM', 'OTHER']),
+    category: z.string().trim().min(2).max(100),
+    stage: z.enum(['IDEA', 'SCRIPT', 'DEVELOPMENT', 'PRODUCTION', 'POST_PRODUCTION']),
+    seeking: z.array(z.enum(['CO_PRODUCTION', 'TALENT', 'FUNDING', 'SUBTITLING', 'DUBBING', 'LOCAL_ADAPTATION', 'LICENSING', 'OTT_DISTRIBUTION'])).max(8).default([]),
+    regions: z.array(z.enum(['MY', 'SG', 'ID', 'TH', 'PH', 'VN', 'BN', 'KH', 'LA', 'MM'])).max(10).default(['MY']),
+    subtitleLanguages: z.array(z.string().trim().min(2).max(40)).max(10).default([]),
+    dubbingLanguages: z.array(z.string().trim().min(2).max(40)).max(10).default([]),
+    investmentTarget: z.number().positive().max(100_000_000).nullable().default(null),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Complete the project title, synopsis, format, stage, and valid opportunity details.' });
+    return;
+  }
+  try {
+    response.status(201).json(await createMarketplaceProject(user.id, input.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects/story-idea', requireAuthenticated, async (request, response, next) => {
+  const user = getAuthenticatedUser(request);
+  if (!hasRole(user, 'CREATOR') && user.role !== 'ADMIN') {
+    response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED', message: 'Story idea generation is available to creator accounts.' });
+    return;
+  }
+  const input = z.object({ prompt: z.string().trim().min(10).max(2000) }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Describe the story idea in at least 10 characters.' });
+    return;
+  }
+  try {
+    response.json(await generateStoryIdea(input.data.prompt));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/interests', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listMarketplaceInterests(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects/:id/interests', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({
+    amount: z.number().positive().max(100_000_000).nullable().default(null),
+    message: z.string().trim().max(1000).default(''),
+  }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid project interest.' });
+    return;
+  }
+  try {
+    const interest = await createMarketplaceInterest(getAuthenticatedUser(request).id, id.data, input.data.amount, input.data.message);
+    if (!interest) {
+      response.status(409).json({ error: 'INTEREST_UNAVAILABLE', message: 'This project is unavailable or you have already contacted its creator.' });
+      return;
+    }
+    response.status(201).json(interest);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/industry/interests/:id', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['ACKNOWLEDGED', 'DECLINED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid inquiry response.' });
+    return;
+  }
+  try {
+    const interest = await updateMarketplaceInterest(getAuthenticatedUser(request).id, id.data, input.data.status);
+    if (!interest) {
+      response.status(404).json({ error: 'INTEREST_NOT_FOUND', message: 'This pending inquiry is not available to your account.' });
+      return;
+    }
+    response.json(interest);
   } catch (error) {
     next(error);
   }
@@ -761,7 +967,7 @@ app.post('/api/v1/payments/stripe/webhook', async (request, response, next) => {
 });
 
 app.get('/api/v1/payments/stripe/return', (_request, response) => {
-  response.type('text/plain').send('Payment status is verified by Stripe. You may return to Global Station and refresh membership status.');
+  response.type('text/plain').send('Payment status is verified by Stripe. You may return to CINEVA and refresh membership status.');
 });
 
 app.get('/api/v1/payments/stripe/cancel', (_request, response) => {
@@ -1127,6 +1333,71 @@ app.post('/api/v1/admin/content', async (request, response, next) => {
     ]);
     response.status(201).json(await createContent({ ...request.body, posterUrl, posterHorizontalUrl, hlsManifestUrl }, userId));
   } catch (error) { next(error); }
+});
+
+app.get('/api/v1/admin/industry/projects', async (request, response, next) => {
+  const status = z.enum(['ALL', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'])
+    .safeParse(typeof request.query.status === 'string' ? request.query.status : 'ALL');
+  if (!status.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid project status.' });
+    return;
+  }
+  try {
+    const values: string[] = [];
+    const where = status.data === 'ALL' ? '' : `WHERE p.status = $${values.push(status.data)}`;
+    const { rows } = await pool.query(`
+      SELECT p.id, p.title, p.summary, p.kind, p.format, p.category, p.stage,
+        p.seeking, p.regions, p.subtitle_languages AS "subtitleLanguages",
+        p.dubbing_languages AS "dubbingLanguages",
+        p.investment_target AS "investmentTarget", p.status,
+        p.created_at AS "createdAt", u.name AS "creatorName", u.email AS "creatorEmail",
+        COALESCE(ip.organization, '') AS organization,
+        (SELECT COUNT(*)::int FROM marketplace_interests mi WHERE mi.project_id = p.id) AS "interestCount"
+      FROM marketplace_projects p
+      JOIN users u ON u.id = p.creator_id
+      LEFT JOIN industry_profiles ip ON ip.user_id = p.creator_id
+      ${where}
+      ORDER BY CASE p.status WHEN 'IN_REVIEW' THEN 0 ELSE 1 END, p.created_at DESC
+      LIMIT 200
+    `, values);
+    response.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/admin/industry/projects/:id/status', async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['APPROVED', 'REJECTED', 'ARCHIVED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid project and moderation status.' });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(`
+      UPDATE marketplace_projects SET status = $1, updated_at = now()
+      WHERE id = $2
+      RETURNING id, title, status
+    `, [input.data.status, id.data]);
+    if (!updated.rowCount) {
+      await client.query('ROLLBACK');
+      response.status(404).json({ error: 'PROJECT_NOT_FOUND', message: 'This project listing no longer exists.' });
+      return;
+    }
+    await client.query(`
+      INSERT INTO admin_audit_logs (admin_user_id, action, entity_type, entity_id, metadata)
+      VALUES ($1, $2, 'MARKETPLACE_PROJECT', $3, $4)
+    `, [getAdminUserId(request), `MARKETPLACE_PROJECT_${input.data.status}`, id.data, { status: input.data.status }]);
+    await client.query('COMMIT');
+    response.json(updated.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
+  }
 });
 
 app.patch('/api/v1/admin/content/:id/status', async (request, response, next) => {

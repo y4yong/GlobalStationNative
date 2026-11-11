@@ -119,7 +119,7 @@ export async function createVipCheckout(user: { id: string; name: string; email:
     fields.set('payment_method_types[1]', 'fpx');
     fields.set('line_items[0][price_data][currency]', 'myr');
     fields.set('line_items[0][price_data][unit_amount]', String(amountSen));
-    fields.set('line_items[0][price_data][product_data][name]', plan === 'VIP_MONTHLY' ? 'Global Station VIP Monthly' : 'Global Station VIP Yearly');
+    fields.set('line_items[0][price_data][product_data][name]', plan === 'VIP_MONTHLY' ? 'CINEVA VIP Monthly' : 'CINEVA VIP Yearly');
     fields.set('line_items[0][quantity]', '1');
     fields.set('customer_email', user.email);
     fields.set('client_reference_id', paymentId);

@@ -79,5 +79,8 @@ await applySql(await readFile(path.resolve(adTargetingPath), 'utf8'));
 const malaysiaStateTargetingPath = fileURLToPath(new URL('../sql/017_malaysia_state_ad_targeting.sql', import.meta.url));
 await applySql(await readFile(path.resolve(malaysiaStateTargetingPath), 'utf8'));
 
+const industryMarketplacePath = fileURLToPath(new URL('../sql/018_industry_marketplace.sql', import.meta.url));
+await applySql(await readFile(path.resolve(industryMarketplacePath), 'utf8'));
+
 await pool.end();
 console.log('Database schema and integration migrations completed without development seed data.');

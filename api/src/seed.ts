@@ -10,4 +10,4 @@ const cleanupPath = fileURLToPath(new URL('../sql/012_remove_demo_content_and_ad
 const cleanupSql = await readFile(path.resolve(cleanupPath), 'utf8');
 await pool.query(cleanupSql);
 await pool.end();
-console.log('Global Station PostgreSQL schema and seed data applied without retired demo content or ads.');
+console.log('CINEVA PostgreSQL schema and seed data applied without retired demo content or ads.');

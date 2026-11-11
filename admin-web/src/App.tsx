@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   Film,
+  Lightbulb,
   LayoutDashboard,
   LogOut,
   Megaphone,
@@ -29,12 +30,13 @@ import {
 import { AnalyticsData, api, login } from './api';
 import { formatDate, formatDateTime } from './formatDate';
 import { contentCategories, contentGenres } from './contentOptions';
-import globalStationLogo from '../../assets/brand/global-station-logo.png';
+import cinevaLogo from '../../assets/brand/cineva-logo.svg';
 
 type View =
   | 'overview'
   | 'analytics'
   | 'content'
+  | 'projects'
   | 'payouts'
   | 'campaigns'
   | 'users'
@@ -44,6 +46,7 @@ const nav: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'analytics', label: 'Audience analytics', icon: BarChart3 },
   { id: 'content', label: 'Content review', icon: Film },
+  { id: 'projects', label: 'Projects & pitches', icon: Lightbulb },
   { id: 'payouts', label: 'Payouts', icon: CircleDollarSign },
   { id: 'campaigns', label: 'Campaigns', icon: Megaphone },
   { id: 'users', label: 'Users', icon: Users },
@@ -77,7 +80,7 @@ function Login() {
   return (
     <main className="login-shell">
       <div className="login-art">
-        <span className="eyebrow">GLOBAL STATION / ADMIN</span>
+        <span className="eyebrow">CINEVA / ADMIN</span>
         <h1>
           Make every
           <br />
@@ -89,7 +92,7 @@ function Login() {
         </div>
       </div>
       <form className="login-panel" onSubmit={submit}>
-        <img className="brand-logo login-brand-logo" src={globalStationLogo} alt="Global Station" />
+        <img className="brand-logo login-brand-logo" src={cinevaLogo} alt="CINEVA" />
         <h2>Sign in to Control Room</h2>
         <label>
           Email
@@ -155,9 +158,9 @@ function App() {
     <div className="app-shell">
       <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
         <div className="sidebar-brand">
-          <img className="brand-logo" src={globalStationLogo} alt="Global Station" />
+          <img className="brand-logo" src={cinevaLogo} alt="CINEVA" />
           <div>
-            <strong>GLOBAL STATION</strong>
+            <strong>CINEVA</strong>
             <small>CONTROL ROOM</small>
           </div>
           <button
@@ -257,6 +260,7 @@ function ViewContent({
   if (view === 'overview') return <Overview overview={overview} />;
   if (view === 'analytics') return <AnalyticsDashboard refresh={refresh} />;
   if (view === 'content') return <ContentReview action={action} refresh={refresh} />;
+  if (view === 'projects') return <IndustryProjects action={action} refresh={refresh} />;
   if (view === 'payouts') return <Payouts action={action} />;
   if (view === 'campaigns') return <Campaigns action={action} refresh={refresh} />;
   if (view === 'users') return <UsersView action={action} refresh={refresh} />;
@@ -1206,6 +1210,90 @@ function MapPoint({
       pathOptions={{ color: '#315d48', fillColor: '#7fb18a', fillOpacity: 0.9 }}
     />
   ) : null;
+}
+
+function IndustryProjects({
+  action,
+  refresh,
+}: {
+  action: (work: () => Promise<unknown>, message: string) => void;
+  refresh: number;
+}) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [filter, setFilter] = useState('IN_REVIEW');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    api.industryProjects(filter)
+      .then(result => { if (active) setRows(result); })
+      .catch(requestError => {
+        if (active) setError(requestError instanceof Error ? requestError.message : 'Unable to load project pitches.');
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [filter, refresh]);
+
+  return (
+    <>
+      <PageTitle kicker="INDUSTRY MARKETPLACE" title="Projects, scripts & IP" />
+      <div className="review-toolbar">
+        <p className="muted">Review creator-submitted opportunities before they appear in Discover or Invest.</p>
+        <select aria-label="Project listing status" value={filter} onChange={event => setFilter(event.target.value)}>
+          <option value="IN_REVIEW">Needs review</option>
+          <option value="APPROVED">Approved</option>
+          <option value="REJECTED">Rejected</option>
+          <option value="ARCHIVED">Archived</option>
+          <option value="ALL">All listings</option>
+        </select>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {loading && <p className="muted">Loading marketplace listings…</p>}
+      {!loading && rows.length === 0 && <Empty text="No project listings match this filter." />}
+      <div className="campaign-grid">
+        {rows.map(row => (
+          <article className={`panel campaign-card${row.status === 'IN_REVIEW' ? ' pending-review' : ''}`} key={row.id}>
+            <div className="campaign-header">
+              <div>
+                <span className="section-kicker">{row.kind} · {row.format.replaceAll('_', ' ')}</span>
+                <h3>{row.title}</h3>
+              </div>
+              <Status value={row.status} />
+            </div>
+            <p className="muted">{row.summary}</p>
+            <div className="review-tags">
+              <span>{row.category}</span>
+              <span>{row.stage.replaceAll('_', ' ')}</span>
+              {row.seeking.map((need: string) => <span key={need}>{need.replaceAll('_', ' ')}</span>)}
+            </div>
+            <dl className="detail-grid">
+              <div><dt>Creator</dt><dd>{row.creatorName}{row.organization ? ` · ${row.organization}` : ''}</dd></div>
+              <div><dt>Investment target</dt><dd>{row.investmentTarget ? `RM ${Number(row.investmentTarget).toLocaleString()}` : 'Not specified'}</dd></div>
+              <div><dt>Inquiries</dt><dd>{row.interestCount}</dd></div>
+              <div><dt>Regions</dt><dd>{row.regions.join(', ')}</dd></div>
+              <div><dt>Subtitles</dt><dd>{row.subtitleLanguages.join(', ') || 'Not specified'}</dd></div>
+              <div><dt>Dubbing</dt><dd>{row.dubbingLanguages.join(', ') || 'Not specified'}</dd></div>
+            </dl>
+            {row.status === 'IN_REVIEW' && (
+              <div className="row-actions">
+                <button className="reject" onClick={() => action(
+                  () => api.industryProjectStatus(row.id, 'REJECTED'),
+                  'Project pitch rejected.',
+                )}>Reject</button>
+                <button className="approve" onClick={() => action(
+                  () => api.industryProjectStatus(row.id, 'APPROVED'),
+                  'Project pitch approved and listed.',
+                )}>Approve</button>
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </>
+  );
 }
 
 function Payouts({

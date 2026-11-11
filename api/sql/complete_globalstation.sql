@@ -1,4 +1,4 @@
--- Global Station complete PostgreSQL + PostGIS schema and development seed.
+-- CINEVA complete PostgreSQL + PostGIS schema and development seed.
 -- Run against an empty database named globalstation with:
 --   psql -U postgres -d globalstation -f complete_globalstation.sql
 
@@ -267,10 +267,10 @@ GROUP BY u.id;
 -- Development seed users. Password for all accounts is ChangeMe123!.
 INSERT INTO users (id, name, email, password_hash, role, is_vip)
 VALUES
-  ('00000000-0000-0000-0000-000000000001', 'Global Station Admin', 'admin@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADMIN', TRUE),
-  ('00000000-0000-0000-0000-000000000002', 'Aina Rahman', 'creator@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'CREATOR', TRUE),
-  ('00000000-0000-0000-0000-000000000003', 'Daniel Tan', 'advertiser@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADVERTISER', FALSE),
-  ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
+  ('00000000-0000-0000-0000-000000000001', 'CINEVA Admin', 'admin@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADMIN', TRUE),
+  ('00000000-0000-0000-0000-000000000002', 'Aina Rahman', 'creator@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'CREATOR', TRUE),
+  ('00000000-0000-0000-0000-000000000003', 'Daniel Tan', 'advertiser@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADVERTISER', FALSE),
+  ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
@@ -292,4 +292,3 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO admin_audit_logs (admin_user_id, action, entity_type, entity_id, metadata)
 VALUES ('00000000-0000-0000-0000-000000000001', 'SEED_INITIALIZED', 'SYSTEM', 'globalstation', '{"source":"complete_globalstation.sql"}')
 ON CONFLICT DO NOTHING;
-

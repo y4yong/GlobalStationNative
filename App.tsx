@@ -28,7 +28,7 @@ import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, setAdPreferences, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, setAdPreferences, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview, createIndustryConnection, createMarketplaceInterest, createMarketplaceProject, generateStoryIdea, getIndustryConnections, getIndustryPeople, getIndustryProfile, getMarketplaceInterests, getMarketplaceProjects, respondToIndustryConnection, saveIndustryProfile, updateMarketplaceInterest, IndustryConnection, IndustryPerson, IndustryProfile, MarketplaceInterest, MarketplaceProject, MarketplaceNeed } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
@@ -65,7 +65,7 @@ export default function App() {
     alignSelf: 'center' as const,
   };
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
-  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
+  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode' | 'IndustryHub'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -132,8 +132,8 @@ export default function App() {
   }
 
   const availableTabs = [
-    { key: 'Home', icon: '⌂', label: 'Home' },
-    { key: 'Search', icon: '⚲', label: 'Search' },
+    { key: 'Home', icon: '⌂', label: 'Watch' },
+    { key: 'Search', icon: '⚲', label: 'Discover' },
     ...(profile.role === 'ADMIN' || profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '▣', label: 'Creator' }] : []),
     ...(profile.role === 'ADMIN' || profile.roles?.includes('ADVERTISER') || profile.role === 'ADVERTISER' ? [{ key: 'Ads', icon: '▤', label: 'Ads' }] : []),
     { key: 'Profile', icon: '◉', label: 'Profile' },
@@ -309,7 +309,7 @@ export default function App() {
               onToggleFullscreen={() => setAdFullscreen(current => !current)}
             />}
             <View pointerEvents="none" style={styles.watermarkContainer}>
-              <Text style={styles.watermarkText}>GLOBAL STATION</Text>
+              <Text style={styles.watermarkText}>CINEVA</Text>
             </View>
           </View>
           {!adFullscreen && <ScrollView style={styles.playerInfoScroll} contentContainerStyle={styles.playerInfoContent}>
@@ -317,9 +317,9 @@ export default function App() {
             <Text style={styles.playerEpisodeTitle}>{selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)?.title ?? selectedEpisode}</Text>
             <View style={styles.publisherRow}>
               <View style={styles.publisherAvatar}>
-                <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'Global Station').trim().slice(0, 1).toUpperCase()}</Text>
+                <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'CINEVA').trim().slice(0, 1).toUpperCase()}</Text>
               </View>
-              <Text style={styles.publisherName}>{selectedDrama.creatorName || 'Global Station'}</Text>
+              <Text style={styles.publisherName}>{selectedDrama.creatorName || 'CINEVA'}</Text>
             </View>
             {!!selectedDrama.description?.trim() && <>
               <Text style={styles.playerDescriptionLabel}>About this video</Text>
@@ -327,6 +327,8 @@ export default function App() {
             </>}
           </ScrollView>}
         </View>
+      ) : currentScreen === 'IndustryHub' ? (
+        <IndustryHubScreen profile={profile} onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Payout' ? (
         <PayoutScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Upload' ? (
@@ -366,7 +368,7 @@ export default function App() {
             };
             startPlayback(drama, item.episodeTitle, item.resumeAtSeconds, item.episodeId);
           }} onSearch={() => setActiveTab('Search')} onProfile={() => setActiveTab('Profile')} />}
-          {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} />}
+          {activeTab === 'Search' && <SearchTabView dramas={catalog} loading={catalogLoading} onSelect={openDramaDetails} onIndustryHub={() => setCurrentScreen('IndustryHub')} />}
           {activeTab === 'Creator' && <CreatorTabView
             creatorName={profile.name}
             onUpload={() => setCurrentScreen('Upload')}
@@ -431,9 +433,9 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
     <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 24 }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
-        <Text style={styles.authLogo}>GLOBAL STATION</Text>
+        <Text style={styles.authLogo}>CINEVA</Text>
         <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
-        <Text style={styles.screenSubTitle}>Your account connects to the Global Station service.</Text>
+        <Text style={styles.screenSubTitle}>Your account connects to CINEVA.</Text>
         {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
         <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
@@ -451,13 +453,13 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
           <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account...' : 'Signing in...') : registering ? 'Review terms and create account' : 'Sign in'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={{ alignItems: 'center', padding: 16 }} onPress={() => { setRegistering(!registering); setError(''); }}>
-          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to Global Station? Create account'}</Text>
+          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to CINEVA? Create account'}</Text>
         </TouchableOpacity>
       </ScrollView>
       <TermsAcceptanceModal
         visible={termsVisible}
         title="Terms and Conditions"
-        subject="Global Station account"
+        subject="CINEVA account"
         accepted={termsAccepted}
         onToggleAccepted={() => setTermsAccepted(value => !value)}
         onAccept={() => { setTermsVisible(false); void submit(); }}
@@ -487,10 +489,10 @@ function TermsAcceptanceModal({ visible, title, subject, accepted, onToggleAccep
           <Text style={styles.selectModalTitle}>{title}</Text>
           <Text style={styles.termsDraftNotice}>Draft placeholder — replace this text with the final {subject.toLowerCase()} terms before launch.</Text>
           <ScrollView style={styles.termsBody} contentContainerStyle={styles.termsBodyContent}>
-            <Text style={styles.termsSectionTitle}>Using Global Station</Text>
+            <Text style={styles.termsSectionTitle}>Using CINEVA</Text>
             <Text style={styles.termsCopy}>Use your account lawfully and keep your sign-in details secure. You are responsible for activity performed through your account.</Text>
             <Text style={styles.termsSectionTitle}>Your content and activity</Text>
-            <Text style={styles.termsCopy}>Only upload or share material you have the right to use. Global Station features and availability may change as the service is developed.</Text>
+            <Text style={styles.termsCopy}>Only upload or share material you have the right to use. CINEVA features and availability may change as the service is developed.</Text>
             <Text style={styles.termsSectionTitle}>Final terms to be added</Text>
             <Text style={styles.termsCopy}>The complete terms, privacy details, eligibility requirements, and any role-specific conditions will be provided here by the service owner.</Text>
           </ScrollView>
@@ -585,7 +587,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
       <View style={styles.brandHeader}>
-        <Text style={styles.brandTitle}>GLOBAL STATION</Text>
+        <Text style={styles.brandTitle}>CINEVA</Text>
         <View style={styles.headerRightIcons}>
           <TouchableOpacity onPress={onSearch}><Text style={styles.iconTxt}>⚲</Text></TouchableOpacity>
           <TouchableOpacity onPress={onProfile}><Text style={styles.iconTxt}>👤</Text></TouchableOpacity>
@@ -653,7 +655,7 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 }
 
 // --- TAB 2: SEARCH & FILTER ---
-function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void }) {
+function SearchTabView({ dramas, loading, onSelect, onIndustryHub }: { dramas: DramaItem[]; loading: boolean; onSelect: (d: DramaItem) => void; onIndustryHub: () => void }) {
   const [query, setQuery] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(true);
   const [selectedGenre, setSelectedGenre] = useState('All');
@@ -705,8 +707,12 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
-      <Text style={styles.screenMainTitle}>Search</Text>
-      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, or type.</Text>
+      <Text style={styles.screenMainTitle}>Discover</Text>
+      <Text style={styles.screenSubTitle}>Find your next story, or meet the people bringing it to screen.</Text>
+      <TouchableOpacity style={[styles.creatorContentCard, { marginTop: 16, marginBottom: 8 }]} onPress={onIndustryHub}>
+        <Text style={styles.searchResultTitle}>Industry Hub · Connect, invest & create</Text>
+        <Text style={styles.creatorMeta}>Explore Malaysian stories, creator pitches, and regional partners  ›</Text>
+      </TouchableOpacity>
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
@@ -783,6 +789,259 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
       ))}
       {!loading && filtered.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
+  );
+}
+
+function IndustryHubScreen({ profile, onBack }: { profile: ViewerProfile; onBack: () => void }) {
+  const sections = ['Discover', 'Connect', 'Invest', 'Create'] as const;
+  const [section, setSection] = useState<(typeof sections)[number]>('Discover');
+  const [industryProfile, setIndustryProfile] = useState<IndustryProfile | null>(null);
+  const [people, setPeople] = useState<IndustryPerson[]>([]);
+  const [connections, setConnections] = useState<IndustryConnection[]>([]);
+  const [projects, setProjects] = useState<MarketplaceProject[]>([]);
+  const [interests, setInterests] = useState<MarketplaceInterest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [organization, setOrganization] = useState('');
+  const [industryRole, setIndustryRole] = useState('');
+  const [bio, setBio] = useState('');
+  const [region, setRegion] = useState('Malaysia');
+  const [title, setTitle] = useState('');
+  const [summary, setSummary] = useState('');
+  const [storyPrompt, setStoryPrompt] = useState('');
+  const [investmentTarget, setInvestmentTarget] = useState('');
+  const [selectedNeeds, setSelectedNeeds] = useState<MarketplaceNeed[]>(['FUNDING', 'SUBTITLING', 'DUBBING']);
+  const [interestMessage, setInterestMessage] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [savedProfile, directory, requestList, discoverProjects, myProjects, investorProjects, interestList] = await Promise.all([
+        getIndustryProfile(),
+        getIndustryPeople(),
+        getIndustryConnections(),
+        getMarketplaceProjects('DISCOVER'),
+        getMarketplaceProjects('MINE'),
+        getMarketplaceProjects('INVEST'),
+        getMarketplaceInterests(),
+      ]);
+      setIndustryProfile(savedProfile);
+      setPeople(directory);
+      setConnections(requestList);
+      setProjects(section === 'Create' ? myProjects : section === 'Invest' ? investorProjects : discoverProjects);
+      setInterests(interestList);
+      setOrganization(savedProfile?.organization ?? '');
+      setIndustryRole(savedProfile?.industryRole ?? (profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? 'Creator' : 'Film & television professional'));
+      setBio(savedProfile?.bio ?? '');
+      setRegion(savedProfile?.region ?? 'Malaysia');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load the Industry Hub.');
+    } finally {
+      setLoading(false);
+    }
+  }, [profile.role, profile.roles, section]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function runAction(action: () => Promise<unknown>, successMessage: string) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await action();
+      setNotice(successMessage);
+      await refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'The request could not be completed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitProfile() {
+    if (industryRole.trim().length < 2) {
+      setError('Add your role or specialty to create an Industry Hub profile.');
+      return;
+    }
+    await runAction(
+      () => saveIndustryProfile({ organization: organization.trim(), industryRole: industryRole.trim(), bio: bio.trim(), region: region.trim() || 'Malaysia' }),
+      'Your industry profile is saved.',
+    );
+  }
+
+  async function submitProject() {
+    if (title.trim().length < 3 || summary.trim().length < 20) {
+      setError('Add a project title and a synopsis of at least 20 characters.');
+      return;
+    }
+    if (investmentTarget.trim() && (!Number.isFinite(Number(investmentTarget)) || Number(investmentTarget) <= 0)) {
+      setError('Enter a valid positive investment target in RM, or leave it blank.');
+      return;
+    }
+    await runAction(() => createMarketplaceProject({
+      title: title.trim(),
+      summary: summary.trim(),
+      kind: 'PROJECT',
+      format: 'VERTICAL_SERIES',
+      category: 'Malaysian Original',
+      stage: 'IDEA',
+      seeking: selectedNeeds,
+      regions: ['MY', 'SG', 'ID'],
+      subtitleLanguages: ['English', 'Malay'],
+      dubbingLanguages: ['English', 'Malay'],
+      investmentTarget: investmentTarget.trim() ? Number(investmentTarget) : null,
+    }), 'Pitch submitted for CINEVA review.');
+    setTitle('');
+    setSummary('');
+  }
+
+  async function makeStoryIdea() {
+    if (storyPrompt.trim().length < 10) {
+      setError('Describe your story in at least 10 characters before generating an idea.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const idea = await generateStoryIdea(storyPrompt);
+      setTitle(idea.title);
+      setSummary(idea.summary);
+      setNotice('Story idea generated. Review and edit it before submitting your pitch.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to generate a story idea.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ownsIncomingInterest = (interest: MarketplaceInterest) => interest.isOwner && interest.status === 'PENDING';
+  const needs: MarketplaceNeed[] = ['CO_PRODUCTION', 'TALENT', 'FUNDING', 'SUBTITLING', 'DUBBING', 'LOCAL_ADAPTATION', 'LICENSING', 'OTT_DISTRIBUTION'];
+  const pretty = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+  const canPitch = profile.role === 'ADMIN' || profile.role === 'CREATOR' || profile.roles?.includes('CREATOR');
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.topHeader}>
+        <TouchableOpacity style={styles.headerBackButton} onPress={onBack}><Text style={styles.backBtnText}>‹ Back to Discover</Text></TouchableOpacity>
+        <Text style={styles.screenMainTitle}>Industry Hub</Text>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+        <Text style={styles.screenSubTitle}>Connect Malaysian stories with talent, partners, audiences, and regional opportunities.</Text>
+        <View style={{ flexDirection: 'row', gap: 7, marginVertical: 16 }}>
+          {sections.map(item => (
+            <TouchableOpacity key={item} accessibilityRole="button" accessibilityState={{ selected: section === item }} onPress={() => setSection(item)} style={{ flex: 1, minHeight: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: section === item ? COLORS.cyan : COLORS.cardBorder, backgroundColor: section === item ? COLORS.cyanSoft : COLORS.cardBg }}>
+              <Text style={{ color: section === item ? COLORS.cyan : COLORS.textDim, fontSize: 11, fontWeight: '700' }}>{item}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {!!error && <Text style={styles.errorText}>{error}</Text>}
+        {!!notice && <Text style={[styles.screenSubTitle, { marginBottom: 10 }]}>{notice}</Text>}
+        {loading && <ActivityIndicator color={COLORS.cyan} />}
+
+        {!loading && section === 'Discover' && <>
+          <Text style={styles.sectionHeaderTitle}>Malaysian originals · regional reach</Text>
+          <Text style={styles.screenSubTitle}>Browse vetted scripts, IP, and projects seeking co-production, localization, licensing, or OTT distribution.</Text>
+          {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{project.title}</Text>
+            <Text style={styles.creatorMeta}>{project.category} · {pretty(project.format)} · {pretty(project.stage)}</Text>
+            <Text style={[styles.creatorMeta, { marginTop: 8 }]}>{project.summary}</Text>
+            <Text style={[styles.creatorMeta, { marginTop: 8 }]}>Seeking: {project.seeking.map(pretty).join(' · ') || 'Regional partners'}</Text>
+            <Text style={styles.creatorMeta}>Subtitles: {project.subtitleLanguages.join(', ') || 'On request'} · Dubbing: {project.dubbingLanguages.join(', ') || 'On request'}</Text>
+            <Text style={styles.creatorMeta}>Regions: {project.regions.join(', ')}</Text>
+            {!project.hasExpressedInterest && project.creatorId !== profile.id && <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => void runAction(() => createMarketplaceInterest(project.id, null, interestMessage.trim()), 'Your interest was sent to the project creator.')}>
+              <Text style={styles.secondaryFlowText}>Contact creator · no funds transferred</Text>
+            </TouchableOpacity>}
+          </View>)}
+          {!projects.length && <Text style={styles.emptyCatalog}>Approved pitches will appear here as creators submit them.</Text>}
+        </>}
+
+        {!loading && section === 'Connect' && <>
+          <View style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{industryProfile ? 'Your Industry Hub profile' : 'Create your industry profile'}</Text>
+            <TextInput value={industryRole} onChangeText={setIndustryRole} placeholder="Role or specialty" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={organization} onChangeText={setOrganization} placeholder="Company or organization (optional)" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={region} onChangeText={setRegion} placeholder="Region" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={bio} onChangeText={setBio} placeholder="Short bio (optional)" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 76, textAlignVertical: 'top' }]} multiline />
+            <TouchableOpacity style={styles.uploadBtn} disabled={busy} onPress={() => void submitProfile()}><Text style={styles.uploadBtnText}>{busy ? 'Saving…' : 'Save profile'}</Text></TouchableOpacity>
+          </View>
+          <Text style={styles.sectionHeaderTitle}>People to connect with</Text>
+          {people.map(person => <View key={person.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{person.name}</Text>
+            <Text style={styles.creatorMeta}>{person.industryRole}{person.organization ? ` · ${person.organization}` : ''} · {person.region}</Text>
+            {!!person.bio && <Text style={styles.creatorMeta}>{person.bio}</Text>}
+            {person.connectionStatus ? <Text style={styles.creatorMeta}>Connection: {pretty(person.connectionStatus)}</Text> :
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => createIndustryConnection(person.id, 'I would like to connect about Malaysian and Southeast Asian stories on CINEVA.'), 'Connection request sent.')}>
+                <Text style={styles.creatorDetailsAction}>Connect</Text>
+              </TouchableOpacity>}
+          </View>)}
+          {connections.filter(item => item.status === 'PENDING').map(request => <View key={request.id} style={styles.creatorContentCard}>
+            <Text style={styles.creatorMeta}>{request.peerName} · {request.message || 'Connection request'}</Text>
+            {request.requesterId !== profile.id && <View style={{ flexDirection: 'row', gap: 18, marginTop: 8 }}>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => respondToIndustryConnection(request.id, 'ACCEPTED'), 'Connection accepted.')}><Text style={styles.creatorDetailsAction}>Accept</Text></TouchableOpacity>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => respondToIndustryConnection(request.id, 'DECLINED'), 'Connection declined.')}><Text style={styles.creatorDeleteAction}>Decline</Text></TouchableOpacity>
+            </View>}
+          </View>)}
+          {!people.length && <Text style={styles.emptyCatalog}>Opt-in industry profiles will appear here.</Text>}
+        </>}
+
+        {!loading && section === 'Invest' && <>
+          <Text style={styles.screenSubTitle}>Express interest to start a conversation. This feature records an inquiry only; it does not transfer or hold money.</Text>
+          <TextInput value={interestMessage} onChangeText={setInterestMessage} placeholder="Optional message for creators" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+          {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{project.title}</Text>
+            <Text style={styles.creatorMeta}>{project.creatorName ?? 'CINEVA creator'} · {project.investmentTarget ? `Target RM ${Number(project.investmentTarget).toLocaleString()}` : 'Target not specified'}</Text>
+            <Text style={styles.creatorMeta}>{project.summary}</Text>
+            {project.hasExpressedInterest ? <Text style={styles.creatorMeta}>You have contacted the creator.</Text> :
+              <TouchableOpacity disabled={busy} style={styles.secondaryFlowBtn} onPress={() => void runAction(() => createMarketplaceInterest(project.id, null, interestMessage.trim()), 'Your interest was sent. No funds were transferred.')}>
+                <Text style={styles.secondaryFlowText}>Express interest · no funds transferred</Text>
+              </TouchableOpacity>}
+          </View>)}
+          {interests.filter(ownsIncomingInterest).map(interest => <View key={interest.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>Inquiry for {interest.projectTitle}</Text>
+            <Text style={styles.creatorMeta}>{interest.investorName}: {interest.message || 'Interested in discussing this project.'}</Text>
+            <View style={{ flexDirection: 'row', gap: 18, marginTop: 8 }}>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => updateMarketplaceInterest(interest.id, 'ACKNOWLEDGED'), 'Inquiry acknowledged.')}><Text style={styles.creatorDetailsAction}>Acknowledge</Text></TouchableOpacity>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => updateMarketplaceInterest(interest.id, 'DECLINED'), 'Inquiry declined.')}><Text style={styles.creatorDeleteAction}>Decline</Text></TouchableOpacity>
+            </View>
+          </View>)}
+          {!projects.length && !interests.some(ownsIncomingInterest) && <Text style={styles.emptyCatalog}>No opportunities or investment inquiries are available yet.</Text>}
+        </>}
+
+        {!loading && section === 'Create' && <>
+          {!canPitch ? <View style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>Creator Studio</Text>
+            <Text style={styles.creatorMeta}>Pitch a vertical series or generate Malaysian story ideas after upgrading your account to Creator in Profile.</Text>
+          </View> : <>
+            <Text style={styles.screenSubTitle}>Build an original 9:16 series pitch for Malaysian audiences and regional partners. New listings are reviewed before publication.</Text>
+            <View style={styles.creatorContentCard}>
+              <TextInput value={storyPrompt} onChangeText={setStoryPrompt} placeholder="Describe the characters, setting, and story direction for AI ideas" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 76, textAlignVertical: 'top' }]} multiline />
+              <TouchableOpacity disabled={busy} style={styles.secondaryFlowBtn} onPress={() => void makeStoryIdea()}><Text style={styles.secondaryFlowText}>{busy ? 'Working…' : 'Generate story idea'}</Text></TouchableOpacity>
+              <TextInput value={title} onChangeText={setTitle} placeholder="Project title" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+              <TextInput value={summary} onChangeText={setSummary} placeholder="Synopsis (at least 20 characters)" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 100, textAlignVertical: 'top' }]} multiline />
+              <TextInput value={investmentTarget} onChangeText={setInvestmentTarget} keyboardType="decimal-pad" placeholder="Optional investment target (RM)" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+              <Text style={[styles.creatorMeta, { marginTop: 8 }]}>What are you looking for?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 10 }}>
+                {needs.map(need => {
+                  const selected = selectedNeeds.includes(need);
+                  return <TouchableOpacity key={need} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setSelectedNeeds(current => selected ? current.filter(item => item !== need) : [...current, need])} style={{ borderWidth: 1, borderColor: selected ? COLORS.cyan : COLORS.cardBorder, borderRadius: 16, paddingVertical: 7, paddingHorizontal: 10 }}>
+                    <Text style={{ color: selected ? COLORS.cyan : COLORS.textDim, fontSize: 11 }}>{pretty(need)}</Text>
+                  </TouchableOpacity>;
+                })}
+              </View>
+              <TouchableOpacity disabled={busy} style={styles.uploadBtn} onPress={() => void submitProject()}><Text style={styles.uploadBtnText}>{busy ? 'Submitting…' : 'Submit pitch for review'}</Text></TouchableOpacity>
+            </View>
+            {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+              <Text style={styles.searchResultTitle}>{project.title}</Text>
+              <Text style={styles.creatorMeta}>Pitch status: {pretty(project.status)}</Text>
+            </View>)}
+          </>}
+        </>}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -1094,7 +1353,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
 
       {missingRoles.length > 0 && (
         <View style={styles.profileSection}>
-          <Text style={styles.profileSectionTitle}>More ways to use Global Station</Text>
+          <Text style={styles.profileSectionTitle}>More ways to use CINEVA</Text>
           <View style={styles.profileRoleGrid}>
             {missingRoles.includes('CREATOR') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleTermsAccepted(false); setRoleToConfirm('CREATOR'); }}>
               <Text style={styles.profileRoleIcon}>✦</Text>
@@ -1310,7 +1569,7 @@ function EngagementScreen({ profile, onBack, onLocationSharingChange }: { profil
     if (!referral) return;
     try {
       await Share.share({
-        message: `Join me on Global Station. Use my referral code ${referral.code} when you create your account.`,
+        message: `Join me on CINEVA. Use my referral code ${referral.code} when you create your account.`,
       });
     } catch (shareError) {
       setError(shareError instanceof Error ? shareError.message : 'Unable to share your referral code.');
@@ -1399,7 +1658,7 @@ function EngagementScreen({ profile, onBack, onLocationSharingChange }: { profil
         <Text style={styles.profileSectionTitle}>Choose your channels</Text>
         <Text style={styles.screenSubTitle}>Preferences are saved to your account. External delivery channels are not connected yet.</Text>
         {([
-          ['in_app', 'In-app notifications', 'Updates in your Global Station inbox.'],
+          ['in_app', 'In-app notifications', 'Updates in your CINEVA inbox.'],
           ['push', 'Push notifications', 'Available after push service and device permissions are configured.'],
           ['email', 'Email', 'Email delivery provider is not connected yet.'],
           ['sms', 'SMS', 'SMS provider is not connected yet.'],
