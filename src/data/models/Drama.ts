@@ -7,6 +7,10 @@ export interface Episode {
   duration: string;
   rating: string;
   requiresVip: boolean;
+  canBuyWithCoins?: boolean;
+  coinPrice?: number;
+  subtitleLanguages?: string[];
+  dubbingLanguages?: string[];
 }
 
 export interface DramaItem {

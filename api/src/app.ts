@@ -4,15 +4,30 @@ import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from './config.js';
-import { contentCategories, contentGenreSchema } from './contentOptions.js';
-import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerSchema, requireAuthenticated, upgradeRole } from './auth.js';
+import { contentCategories, contentGenreSchema, mediaTrackLanguages } from './contentOptions.js';
+import { getAuthenticatedUser, hasRole, login, loginSchema, register, registerRequestSchema, requireAuthenticated, upgradeRole } from './auth.js';
 import { creatorOverview, requestCreatorPayout } from './creatorRepository.js';
 import { deleteContentPermanently, setContentArchived } from './contentLifecycle.js';
 import { listContinueWatching, listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
 import { lookupViewerRegion } from './locationRegions.js';
 import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
-import { createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
+import { createCoinCheckout, createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
+import { coinWallet, purchaseEpisodeWithCoins } from './coins.js';
+import {
+  createIndustryConnection,
+  createMarketplaceInterest,
+  createMarketplaceProject,
+  getIndustryProfile,
+  listIndustryConnections,
+  listIndustryPeople,
+  listMarketplaceInterests,
+  listMarketplaceProjects,
+  respondToIndustryConnection,
+  saveIndustryProfile,
+  updateMarketplaceInterest,
+} from './industryMarketplace.js';
+import { generateStoryIdea } from './storyGeneration.js';
 import {
   createEngagementCode,
   createNotificationCampaign,
@@ -111,6 +126,198 @@ app.get('/api/v1/watch-history', requireAuthenticated, async (request, response,
   }
 });
 
+app.get('/api/v1/industry/profile', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await getIndustryProfile(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/v1/industry/profile', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({
+    organization: z.string().trim().max(160).default(''),
+    industryRole: z.string().trim().min(2).max(100),
+    bio: z.string().trim().max(1000).default(''),
+    region: z.string().trim().min(2).max(80).default('Malaysia'),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide an industry role and valid profile details.' });
+    return;
+  }
+  try {
+    response.json(await saveIndustryProfile(getAuthenticatedUser(request).id, input.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/people', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listIndustryPeople(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/connections', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listIndustryConnections(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/connections', requireAuthenticated, async (request, response, next) => {
+  const input = z.object({
+    recipientId: z.string().uuid(),
+    message: z.string().trim().max(500).default(''),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid member and connection message.' });
+    return;
+  }
+  try {
+    const connection = await createIndustryConnection(getAuthenticatedUser(request).id, input.data.recipientId, input.data.message);
+    if (!connection) {
+      response.status(409).json({ error: 'CONNECTION_UNAVAILABLE', message: 'This member is unavailable or a connection already exists.' });
+      return;
+    }
+    response.status(201).json(connection);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/industry/connections/:id', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['ACCEPTED', 'DECLINED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid connection and response.' });
+    return;
+  }
+  try {
+    const connection = await respondToIndustryConnection(getAuthenticatedUser(request).id, id.data, input.data.status);
+    if (!connection) {
+      response.status(404).json({ error: 'CONNECTION_NOT_FOUND', message: 'This pending request is not available to your account.' });
+      return;
+    }
+    response.json(connection);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/projects', requireAuthenticated, async (request, response, next) => {
+  const view = z.enum(['DISCOVER', 'MINE', 'INVEST']).safeParse(request.query.view ?? 'DISCOVER');
+  if (!view.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid project view.' });
+    return;
+  }
+  try {
+    response.json(await listMarketplaceProjects(getAuthenticatedUser(request).id, view.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects', requireAuthenticated, async (request, response, next) => {
+  const user = getAuthenticatedUser(request);
+  if (!hasRole(user, 'CREATOR') && user.role !== 'ADMIN') {
+    response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED', message: 'Register as a creator before publishing a project pitch.' });
+    return;
+  }
+  const input = z.object({
+    title: z.string().trim().min(3).max(160),
+    summary: z.string().trim().min(20).max(3000),
+    kind: z.enum(['PROJECT', 'SCRIPT', 'IP', 'TALENT']),
+    format: z.enum(['VERTICAL_SERIES', 'SHORT_FILM', 'FEATURE_FILM', 'OTHER']),
+    category: z.string().trim().min(2).max(100),
+    stage: z.enum(['IDEA', 'SCRIPT', 'DEVELOPMENT', 'PRODUCTION', 'POST_PRODUCTION']),
+    seeking: z.array(z.enum(['CO_PRODUCTION', 'TALENT', 'FUNDING', 'SUBTITLING', 'DUBBING', 'LOCAL_ADAPTATION', 'LICENSING', 'OTT_DISTRIBUTION'])).max(8).default([]),
+    regions: z.array(z.enum(['MY', 'SG', 'ID', 'TH', 'PH', 'VN', 'BN', 'KH', 'LA', 'MM'])).max(10).default(['MY']),
+    subtitleLanguages: z.array(z.string().trim().min(2).max(40)).max(10).default([]),
+    dubbingLanguages: z.array(z.string().trim().min(2).max(40)).max(10).default([]),
+    investmentTarget: z.number().positive().max(100_000_000).nullable().default(null),
+  }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Complete the project title, synopsis, format, stage, and valid opportunity details.' });
+    return;
+  }
+  try {
+    response.status(201).json(await createMarketplaceProject(user.id, input.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects/story-idea', requireAuthenticated, async (request, response, next) => {
+  const user = getAuthenticatedUser(request);
+  if (!hasRole(user, 'CREATOR') && user.role !== 'ADMIN') {
+    response.status(403).json({ error: 'CREATOR_ACCESS_REQUIRED', message: 'Story idea generation is available to creator accounts.' });
+    return;
+  }
+  const input = z.object({ prompt: z.string().trim().min(10).max(2000) }).safeParse(request.body);
+  if (!input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Describe the story idea in at least 10 characters.' });
+    return;
+  }
+  try {
+    response.json(await generateStoryIdea(input.data.prompt));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/v1/industry/interests', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await listMarketplaceInterests(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/industry/projects/:id/interests', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({
+    amount: z.number().positive().max(100_000_000).nullable().default(null),
+    message: z.string().trim().max(1000).default(''),
+  }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid project interest.' });
+    return;
+  }
+  try {
+    const interest = await createMarketplaceInterest(getAuthenticatedUser(request).id, id.data, input.data.amount, input.data.message);
+    if (!interest) {
+      response.status(409).json({ error: 'INTEREST_UNAVAILABLE', message: 'This project is unavailable or you have already contacted its creator.' });
+      return;
+    }
+    response.status(201).json(interest);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/industry/interests/:id', requireAuthenticated, async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['ACKNOWLEDGED', 'DECLINED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid inquiry response.' });
+    return;
+  }
+  try {
+    const interest = await updateMarketplaceInterest(getAuthenticatedUser(request).id, id.data, input.data.status);
+    if (!interest) {
+      response.status(404).json({ error: 'INTEREST_NOT_FOUND', message: 'This pending inquiry is not available to your account.' });
+      return;
+    }
+    response.json(interest);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/v1/auth/login', async (request, response, next) => {
   try {
     const input = loginSchema.safeParse(request.body);
@@ -131,14 +338,22 @@ app.post('/api/v1/auth/login', async (request, response, next) => {
 
 app.post('/api/v1/auth/register', async (request, response, next) => {
   try {
-    const input = registerSchema.extend({
-      referralCode: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/).optional(),
-    }).safeParse(request.body);
+    const input = registerRequestSchema.safeParse(request.body);
     if (!input.success) {
-      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A name, valid email, and password of at least 8 characters are required.' });
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide valid account details and complete age and gender choices when enabling ad personalization.' });
       return;
     }
-    const result = await register(input.data.name, input.data.email, input.data.password, input.data.referralCode);
+    const result = await register(
+      input.data.name,
+      input.data.email,
+      input.data.password,
+      input.data.referralCode,
+      {
+        enabled: input.data.adPersonalizationEnabled,
+        ageRange: input.data.adAgeRange,
+        gender: input.data.adGender,
+      },
+    );
     if (!result) {
       response.status(409).json({ error: 'EMAIL_ALREADY_REGISTERED', message: 'An account already exists for this email.' });
       return;
@@ -172,6 +387,41 @@ app.post('/api/v1/auth/upgrade-role', requireAuthenticated, async (request, resp
 
 app.get('/api/v1/auth/me', requireAuthenticated, (request, response) => {
   response.json(getAuthenticatedUser(request));
+});
+
+app.get('/api/v1/coins/wallet', requireAuthenticated, async (request, response, next) => {
+  try {
+    response.json(await coinWallet(getAuthenticatedUser(request).id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/coins/checkout', requireAuthenticated, async (request, response, next) => {
+  try {
+    const input = z.object({ pack: z.enum(['STARTER', 'POPULAR', 'VALUE']) }).safeParse(request.body);
+    if (!input.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a supported coin pack.' });
+      return;
+    }
+    response.status(201).json(await createCoinCheckout(getAuthenticatedUser(request), input.data.pack));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/v1/coins/episodes/:id/purchase', requireAuthenticated, async (request, response, next) => {
+  try {
+    const episodeId = z.string().uuid().safeParse(request.params.id);
+    if (!episodeId.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid episode ID is required.' });
+      return;
+    }
+    const purchase = await purchaseEpisodeWithCoins(getAuthenticatedUser(request).id, episodeId.data);
+    response.json(purchase);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.patch('/api/v1/auth/location-sharing', requireAuthenticated, async (request, response, next) => {
@@ -465,6 +715,8 @@ app.post('/api/v1/creator/submissions/:id/episodes', requireAuthenticated, async
       title: z.string().trim().min(1).max(255),
       durationSeconds: z.number().int().positive(),
       mediaKey: z.string().min(1),
+      subtitleLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
+      dubbingLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
     }).safeParse(request.body);
     if (!id.success || !input.success) {
       response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid episode title, duration, and uploaded MP4.' });
@@ -488,8 +740,8 @@ app.post('/api/v1/creator/submissions/:id/episodes', requireAuthenticated, async
       );
       const episodeNumber = numberResult.rows[0].nextEpisodeNumber;
       await client.query(
-        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,$2,$3,$4,$5,false)',
-        [id.data, episodeNumber, input.data.title, input.data.durationSeconds, mediaReference],
+        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview, subtitle_languages, dubbing_languages) VALUES ($1,$2,$3,$4,$5,false,$6,$7)',
+        [id.data, episodeNumber, input.data.title, input.data.durationSeconds, mediaReference, input.data.subtitleLanguages, input.data.dubbingLanguages],
       );
       await client.query("UPDATE content SET status = 'IN_REVIEW', updated_at = now() WHERE id = $1", [id.data]);
       await client.query('COMMIT');
@@ -542,6 +794,8 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
     durationSeconds: z.number().int().positive(),
     mediaKey: z.string().min(1),
     isExclusiveVip: z.boolean().default(false),
+    subtitleLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
+    dubbingLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]),
   }).safeParse(request.body);
   if (!input.success) {
     response.status(400).json({ error: 'INVALID_REQUEST', message: 'Complete content details and an uploaded MP4 are required.' });
@@ -561,8 +815,8 @@ app.post('/api/v1/creator/submissions', requireAuthenticated, async (request, re
         [input.data.title, input.data.contentType, input.data.description, posterUrl, posterHorizontalUrl, input.data.rating, input.data.genre, input.data.category, input.data.isExclusiveVip, user.id],
       );
       await client.query(
-        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1,1,$2,$3,$4,true)',
-        [content.rows[0].id, input.data.episodeTitle, input.data.durationSeconds, mediaReference],
+        'INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview, subtitle_languages, dubbing_languages) VALUES ($1,1,$2,$3,$4,true,$5,$6)',
+        [content.rows[0].id, input.data.episodeTitle, input.data.durationSeconds, mediaReference, input.data.subtitleLanguages, input.data.dubbingLanguages],
       );
       await client.query('COMMIT');
       response.status(201).json({ id: content.rows[0].id, status: 'IN_REVIEW' });
@@ -591,13 +845,18 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
       is_free_preview: boolean;
       is_exclusive_vip: boolean;
       has_active_vip: boolean;
+      has_coin_unlock: boolean;
     }>(`
       SELECT e.hls_manifest_url, e.is_free_preview, c.is_exclusive_vip,
         (u.is_vip OR EXISTS (
           SELECT 1 FROM subscriptions s
           WHERE s.user_id = u.id AND s.status = 'ACTIVE'
             AND (s.renews_at IS NULL OR s.renews_at > now())
-        )) AS has_active_vip
+        )) AS has_active_vip,
+        EXISTS (
+          SELECT 1 FROM episode_coin_purchases cp
+          WHERE cp.user_id = u.id AND cp.episode_id = e.id
+        ) AS has_coin_unlock
       FROM episodes e
       JOIN content c ON c.id = e.content_id
       JOIN users u ON u.id = $2
@@ -608,8 +867,10 @@ app.post('/api/v1/streams/access', requireAuthenticated, async (request, respons
       response.status(404).json({ error: 'EPISODE_NOT_FOUND' });
       return;
     }
-    if ((episode.is_exclusive_vip || !episode.is_free_preview) && !episode.has_active_vip) {
-      response.status(403).json({ error: 'VIP_REQUIRED', message: 'An active VIP membership is required to play this episode.' });
+    if ((episode.is_exclusive_vip || !episode.is_free_preview) && !episode.has_active_vip && !episode.has_coin_unlock) {
+      response.status(403).json({ error: 'VIP_REQUIRED', message: episode.is_exclusive_vip
+        ? 'An active VIP membership is required to play this exclusive episode.'
+        : 'Unlock this episode with coins or an active VIP membership.' });
       return;
     }
 
@@ -761,11 +1022,11 @@ app.post('/api/v1/payments/stripe/webhook', async (request, response, next) => {
 });
 
 app.get('/api/v1/payments/stripe/return', (_request, response) => {
-  response.type('text/plain').send('Payment status is verified by Stripe. You may return to Global Station and refresh membership status.');
+  response.type('text/plain').send('Payment status is verified by Stripe. Return to CINEVA and refresh your coin balance or membership status.');
 });
 
 app.get('/api/v1/payments/stripe/cancel', (_request, response) => {
-  response.type('text/plain').send('Checkout was cancelled. No membership change was made.');
+  response.type('text/plain').send('Checkout was cancelled. No coins or membership were added.');
 });
 
 app.get('/api/v1/support/tickets', requireAuthenticated, async (request, response, next) => {
@@ -1127,6 +1388,71 @@ app.post('/api/v1/admin/content', async (request, response, next) => {
     ]);
     response.status(201).json(await createContent({ ...request.body, posterUrl, posterHorizontalUrl, hlsManifestUrl }, userId));
   } catch (error) { next(error); }
+});
+
+app.get('/api/v1/admin/industry/projects', async (request, response, next) => {
+  const status = z.enum(['ALL', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'])
+    .safeParse(typeof request.query.status === 'string' ? request.query.status : 'ALL');
+  if (!status.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Choose a valid project status.' });
+    return;
+  }
+  try {
+    const values: string[] = [];
+    const where = status.data === 'ALL' ? '' : `WHERE p.status = $${values.push(status.data)}`;
+    const { rows } = await pool.query(`
+      SELECT p.id, p.title, p.summary, p.kind, p.format, p.category, p.stage,
+        p.seeking, p.regions, p.subtitle_languages AS "subtitleLanguages",
+        p.dubbing_languages AS "dubbingLanguages",
+        p.investment_target AS "investmentTarget", p.status,
+        p.created_at AS "createdAt", u.name AS "creatorName", u.email AS "creatorEmail",
+        COALESCE(ip.organization, '') AS organization,
+        (SELECT COUNT(*)::int FROM marketplace_interests mi WHERE mi.project_id = p.id) AS "interestCount"
+      FROM marketplace_projects p
+      JOIN users u ON u.id = p.creator_id
+      LEFT JOIN industry_profiles ip ON ip.user_id = p.creator_id
+      ${where}
+      ORDER BY CASE p.status WHEN 'IN_REVIEW' THEN 0 ELSE 1 END, p.created_at DESC
+      LIMIT 200
+    `, values);
+    response.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/v1/admin/industry/projects/:id/status', async (request, response, next) => {
+  const id = z.string().uuid().safeParse(request.params.id);
+  const input = z.object({ status: z.enum(['APPROVED', 'REJECTED', 'ARCHIVED']) }).safeParse(request.body);
+  if (!id.success || !input.success) {
+    response.status(400).json({ error: 'INVALID_REQUEST', message: 'Provide a valid project and moderation status.' });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(`
+      UPDATE marketplace_projects SET status = $1, updated_at = now()
+      WHERE id = $2
+      RETURNING id, title, status
+    `, [input.data.status, id.data]);
+    if (!updated.rowCount) {
+      await client.query('ROLLBACK');
+      response.status(404).json({ error: 'PROJECT_NOT_FOUND', message: 'This project listing no longer exists.' });
+      return;
+    }
+    await client.query(`
+      INSERT INTO admin_audit_logs (admin_user_id, action, entity_type, entity_id, metadata)
+      VALUES ($1, $2, 'MARKETPLACE_PROJECT', $3, $4)
+    `, [getAdminUserId(request), `MARKETPLACE_PROJECT_${input.data.status}`, id.data, { status: input.data.status }]);
+    await client.query('COMMIT');
+    response.json(updated.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
+  }
 });
 
 app.patch('/api/v1/admin/content/:id/status', async (request, response, next) => {

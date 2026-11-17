@@ -1,4 +1,4 @@
--- Global Station complete PostgreSQL + PostGIS schema and development seed.
+-- CINEVA complete PostgreSQL + PostGIS schema and development seed.
 -- Run against an empty database named globalstation with:
 --   psql -U postgres -d globalstation -f complete_globalstation.sql
 
@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(20) NOT NULL DEFAULT 'VIEWER' CHECK (role IN ('VIEWER', 'CREATOR', 'ADVERTISER', 'ADMIN')),
   is_vip BOOLEAN NOT NULL DEFAULT FALSE,
+  coin_balance INTEGER NOT NULL DEFAULT 0 CHECK (coin_balance >= 0),
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED')),
   location_analytics_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   ad_personalization_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -86,8 +87,32 @@ CREATE TABLE IF NOT EXISTS episodes (
   hls_manifest_url TEXT NOT NULL,
   dash_manifest_url TEXT,
   is_free_preview BOOLEAN NOT NULL DEFAULT FALSE,
+  subtitle_languages TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  dubbing_languages TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(content_id, episode_number)
+);
+
+CREATE TABLE IF NOT EXISTS coin_topups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pack_code VARCHAR(20) NOT NULL,
+  coin_amount INTEGER NOT NULL CHECK (coin_amount > 0),
+  amount_sen INTEGER NOT NULL CHECK (amount_sen > 0),
+  currency CHAR(3) NOT NULL DEFAULT 'MYR',
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PAID', 'FAILED')),
+  stripe_session_id VARCHAR(150) UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  paid_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS episode_coin_purchases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  episode_id UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  coin_amount INTEGER NOT NULL CHECK (coin_amount > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, episode_id)
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -267,10 +292,10 @@ GROUP BY u.id;
 -- Development seed users. Password for all accounts is ChangeMe123!.
 INSERT INTO users (id, name, email, password_hash, role, is_vip)
 VALUES
-  ('00000000-0000-0000-0000-000000000001', 'Global Station Admin', 'admin@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADMIN', TRUE),
-  ('00000000-0000-0000-0000-000000000002', 'Aina Rahman', 'creator@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'CREATOR', TRUE),
-  ('00000000-0000-0000-0000-000000000003', 'Daniel Tan', 'advertiser@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADVERTISER', FALSE),
-  ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@globalstation.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
+  ('00000000-0000-0000-0000-000000000001', 'CINEVA Admin', 'admin@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADMIN', TRUE),
+  ('00000000-0000-0000-0000-000000000002', 'Aina Rahman', 'creator@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'CREATOR', TRUE),
+  ('00000000-0000-0000-0000-000000000003', 'Daniel Tan', 'advertiser@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'ADVERTISER', FALSE),
+  ('00000000-0000-0000-0000-000000000004', 'Maya Viewer', 'viewer@cineva.local', crypt('ChangeMe123!', gen_salt('bf', 12)), 'VIEWER', TRUE)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, is_vip = EXCLUDED.is_vip;
 
 INSERT INTO subscriptions (id, user_id, plan_code, status, started_at, renews_at)
@@ -292,4 +317,3 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO admin_audit_logs (admin_user_id, action, entity_type, entity_id, metadata)
 VALUES ('00000000-0000-0000-0000-000000000001', 'SEED_INITIALIZED', 'SYSTEM', 'globalstation', '{"source":"complete_globalstation.sql"}')
 ON CONFLICT DO NOTHING;
-

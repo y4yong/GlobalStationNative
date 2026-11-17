@@ -66,10 +66,34 @@ export interface ViewerProfile {
   role: UserRole;
   roles: UserRole[];
   isVip: boolean;
+  coinBalance: number;
   locationAnalyticsEnabled: boolean;
   adPersonalizationEnabled: boolean;
   adAgeRange: string | null;
   adGender: 'WOMAN' | 'MAN' | 'NON_BINARY' | 'PREFER_NOT_TO_SAY' | null;
+}
+
+export interface CoinWallet {
+  balance: number;
+  unlockedEpisodeIds: string[];
+  episodePrice: number;
+  packs: Array<{ code: 'STARTER' | 'POPULAR' | 'VALUE'; coins: number; amount: string; currency: 'MYR'; label: string }>;
+}
+
+export function getCoinWallet(): Promise<CoinWallet> {
+  return request<CoinWallet>('/coins/wallet');
+}
+
+export function purchaseEpisodeWithCoins(episodeId: string): Promise<{ balance: number; episodeId: string; alreadyUnlocked: boolean }> {
+  return request<{ balance: number; episodeId: string; alreadyUnlocked: boolean }>(`/coins/episodes/${encodeURIComponent(episodeId)}/purchase`, { method: 'POST' });
+}
+
+export function createCoinCheckout(pack: CoinWallet['packs'][number]['code']): Promise<{ paymentUrl: string; coins: number }> {
+  return request<{ paymentUrl: string; coins: number }>('/coins/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pack }),
+  });
 }
 
 interface SessionResponse { token: string; role: UserRole; expiresAt: string }
@@ -86,9 +110,29 @@ export async function loginViewer(email: string, password: string): Promise<View
   return getViewerProfile();
 }
 
-export async function registerViewer(name: string, email: string, password: string, referralCode?: string): Promise<ViewerProfile> {
+export async function registerViewer(
+  name: string,
+  email: string,
+  password: string,
+  referralCode?: string,
+  adPreferences: {
+    enabled: boolean;
+    ageRange: ViewerProfile['adAgeRange'];
+    gender: ViewerProfile['adGender'];
+  } = { enabled: false, ageRange: null, gender: null },
+): Promise<ViewerProfile> {
   const session = await request<SessionResponse>('/auth/register', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password, referralCode }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      email,
+      password,
+      referralCode,
+      adPersonalizationEnabled: adPreferences.enabled,
+      adAgeRange: adPreferences.ageRange,
+      adGender: adPreferences.gender,
+    }),
   });
   await persistSession(session);
   return getViewerProfile();
@@ -276,6 +320,99 @@ export interface ContinueWatchingItem {
   timeLeft: string;
 }
 
+export type IndustryRole = 'CREATOR' | 'ADVERTISER' | 'VIEWER' | 'ADMIN';
+export type MarketplaceProjectKind = 'PROJECT' | 'SCRIPT' | 'IP' | 'TALENT';
+export type MarketplaceProjectFormat = 'VERTICAL_SERIES' | 'SHORT_FILM' | 'FEATURE_FILM' | 'OTHER';
+export type MarketplaceProjectStage = 'IDEA' | 'SCRIPT' | 'DEVELOPMENT' | 'PRODUCTION' | 'POST_PRODUCTION';
+export type MarketplaceNeed =
+  | 'CO_PRODUCTION'
+  | 'TALENT'
+  | 'FUNDING'
+  | 'SUBTITLING'
+  | 'DUBBING'
+  | 'LOCAL_ADAPTATION'
+  | 'LICENSING'
+  | 'OTT_DISTRIBUTION';
+
+export interface IndustryProfile {
+  id: string;
+  organization: string;
+  industryRole: string;
+  bio: string;
+  region: string;
+}
+
+export interface IndustryPerson extends IndustryProfile {
+  name: string;
+  roles: IndustryRole[];
+  connectionId: string | null;
+  connectionStatus: 'PENDING' | 'ACCEPTED' | 'DECLINED' | null;
+  connectionDirection: 'INCOMING' | 'OUTGOING' | null;
+}
+
+export interface IndustryConnection {
+  id: string;
+  requesterId: string;
+  recipientId: string;
+  peerId: string;
+  peerName: string;
+  organization: string | null;
+  industryRole: string | null;
+  message: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED';
+  createdAt: string;
+}
+
+export interface MarketplaceProject {
+  id: string;
+  creatorId: string;
+  title: string;
+  summary: string;
+  kind: MarketplaceProjectKind;
+  format: MarketplaceProjectFormat;
+  category: string;
+  stage: MarketplaceProjectStage;
+  seeking: MarketplaceNeed[];
+  regions: string[];
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
+  investmentTarget: string | number | null;
+  status: 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
+  createdAt: string;
+  creatorName?: string;
+  organization?: string;
+  hasExpressedInterest?: boolean;
+  interestCount?: number;
+}
+
+export interface MarketplaceInterest {
+  id: string;
+  projectId: string;
+  projectTitle: string;
+  creatorId: string;
+  investorId: string;
+  investorName: string;
+  amount: string | number | null;
+  message: string;
+  status: 'PENDING' | 'ACKNOWLEDGED' | 'DECLINED';
+  createdAt: string;
+  isOwner: boolean;
+}
+
+export interface CreateMarketplaceProject {
+  title: string;
+  summary: string;
+  kind: MarketplaceProjectKind;
+  format: MarketplaceProjectFormat;
+  category: string;
+  stage: MarketplaceProjectStage;
+  seeking: MarketplaceNeed[];
+  regions: string[];
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
+  investmentTarget: number | null;
+}
+
 export interface AdvertiserCampaign {
   id: string;
   campaignName: string;
@@ -309,6 +446,82 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
   return history
     .filter((item) => !!item && typeof item.episodeId === 'string' && item.episodeId.trim().length > 0)
     .map((item) => ({ ...item, posterUrl: normalizeUrl(item.posterUrl) ?? undefined }));
+}
+
+export function getIndustryProfile(): Promise<IndustryProfile | null> {
+  return request<IndustryProfile | null>('/industry/profile');
+}
+
+export function saveIndustryProfile(input: Omit<IndustryProfile, 'id'>): Promise<IndustryProfile> {
+  return request<IndustryProfile>('/industry/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function getIndustryPeople(): Promise<IndustryPerson[]> {
+  return request<IndustryPerson[]>('/industry/people');
+}
+
+export function getIndustryConnections(): Promise<IndustryConnection[]> {
+  return request<IndustryConnection[]>('/industry/connections');
+}
+
+export function createIndustryConnection(recipientId: string, message: string): Promise<IndustryConnection> {
+  return request<IndustryConnection>('/industry/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipientId, message }),
+  });
+}
+
+export function respondToIndustryConnection(id: string, status: 'ACCEPTED' | 'DECLINED'): Promise<IndustryConnection> {
+  return request<IndustryConnection>(`/industry/connections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function getMarketplaceProjects(view: 'DISCOVER' | 'MINE' | 'INVEST' = 'DISCOVER'): Promise<MarketplaceProject[]> {
+  return request<MarketplaceProject[]>(`/industry/projects?view=${encodeURIComponent(view)}`);
+}
+
+export function createMarketplaceProject(input: CreateMarketplaceProject): Promise<MarketplaceProject> {
+  return request<MarketplaceProject>('/industry/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function generateStoryIdea(prompt: string): Promise<{ title: string; summary: string }> {
+  return request<{ title: string; summary: string }>('/industry/projects/story-idea', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export function getMarketplaceInterests(): Promise<MarketplaceInterest[]> {
+  return request<MarketplaceInterest[]>('/industry/interests');
+}
+
+export function createMarketplaceInterest(projectId: string, amount: number | null, message: string): Promise<MarketplaceInterest> {
+  return request<MarketplaceInterest>(`/industry/projects/${encodeURIComponent(projectId)}/interests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, message }),
+  });
+}
+
+export function updateMarketplaceInterest(id: string, status: 'ACKNOWLEDGED' | 'DECLINED'): Promise<MarketplaceInterest> {
+  return request<MarketplaceInterest>(`/industry/interests/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
 }
 
 export async function searchCatalog(query: string): Promise<DramaItem[]> {
@@ -405,6 +618,8 @@ export function addCreatorEpisode(id: string, input: {
   title: string;
   durationSeconds: number;
   mediaKey: string;
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
 }) {
   return request<{ id: string; episodeNumber: number; status: 'IN_REVIEW' }>(`/creator/submissions/${encodeURIComponent(id)}/episodes`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
@@ -434,6 +649,8 @@ export function submitCreatorContent(payload: {
   durationSeconds: number;
   mediaKey: string;
   isExclusiveVip: boolean;
+  subtitleLanguages: string[];
+  dubbingLanguages: string[];
 }) {
   return request<{ id: string; status: 'IN_REVIEW' }>('/creator/submissions', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),

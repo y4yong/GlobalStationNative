@@ -1,5 +1,5 @@
 {
-  "name": "globalstation-api",
+  "name": "cineva-api",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -13,6 +13,7 @@
     "test": "node --test --import tsx"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1165.0",
     "@aws-sdk/client-s3": "^3.1141.0",
     "@aws-sdk/cloudfront-signer": "^3.1138.0",
     "@aws-sdk/s3-request-presigner": "^3.1141.0",

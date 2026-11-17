@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { pool } from './db.js';
 import { signAdminPlaybackUrl } from './mediaStorage.js';
 import { lookupViewerRegion } from './locationRegions.js';
-import { contentCategories, contentGenreSchema } from './contentOptions.js';
+import { contentCategories, contentGenreSchema, mediaTrackLanguages } from './contentOptions.js';
 
 interface AdminRequest extends Request { adminUserId?: string }
 const contentStatuses = ['DRAFT', 'IN_REVIEW', 'APPROVED', 'REJECTED'] as const;
@@ -242,7 +242,8 @@ export async function adminContentDetail(id: string) {
       COALESCE(json_agg(json_build_object(
         'id', e.id, 'episodeNumber', e.episode_number, 'title', e.title,
         'durationSeconds', e.duration_seconds, 'mediaReference', e.hls_manifest_url,
-        'isFreePreview', e.is_free_preview
+        'isFreePreview', e.is_free_preview, 'subtitleLanguages', e.subtitle_languages,
+        'dubbingLanguages', e.dubbing_languages
       ) ORDER BY e.episode_number) FILTER (WHERE e.id IS NOT NULL), '[]') AS episodes
     FROM content c
     LEFT JOIN users u ON u.id = c.created_by
@@ -266,9 +267,9 @@ export async function adminContentDetail(id: string) {
 
 export async function createContent(input: unknown, userId?: string) {
   const isAllowedMediaReference = (value: string) => value.startsWith('s3://') || value.startsWith('https://') || (config.MEDIA_STORAGE_DRIVER === 'local' && value.startsWith('http://'));
-  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine(isAllowedMediaReference), posterHorizontalUrl: z.string().refine(isAllowedMediaReference).optional(), rating: z.enum(contentRatings), genre: contentGenreSchema, category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine(isAllowedMediaReference), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
+  const data = z.object({ title: z.string().min(2), contentType: z.enum(['MOVIE', 'SERIES']), description: z.string().min(10), posterUrl: z.string().refine(isAllowedMediaReference), posterHorizontalUrl: z.string().refine(isAllowedMediaReference).optional(), rating: z.enum(contentRatings), genre: contentGenreSchema, category: z.enum(contentCategories), isExclusiveVip: z.boolean().default(false), episodeTitle: z.string().min(1), durationSeconds: z.number().int().positive(), hlsManifestUrl: z.string().refine(isAllowedMediaReference), subtitleLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]), dubbingLanguages: z.array(z.enum(mediaTrackLanguages)).max(mediaTrackLanguages.length).default([]), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }).parse(input);
   const client = await pool.connect();
-  try { await client.query('BEGIN'); const origin = data.latitude !== undefined && data.longitude !== undefined ? `SRID=4326;POINT(${data.longitude} ${data.latitude})` : null; const content = await client.query<{ id: string }>('INSERT INTO content (title, content_type, description, poster_url, poster_horizontal_url, rating, genre, category, is_exclusive_vip, status, origin, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'APPROVED\',ST_GeogFromText($10),$11) RETURNING id', [data.title, data.contentType, data.description, data.posterUrl, data.posterHorizontalUrl ?? null, data.rating, data.genre, data.category, data.isExclusiveVip, origin, userId ?? null]); await client.query('INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview) VALUES ($1, 1, $2, $3, $4, true)', [content.rows[0].id, data.episodeTitle, data.durationSeconds, data.hlsManifestUrl]); await client.query('COMMIT'); await audit(userId, 'CONTENT_CREATED', 'CONTENT', content.rows[0].id, { contentType: data.contentType }); return { id: content.rows[0].id }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  try { await client.query('BEGIN'); const origin = data.latitude !== undefined && data.longitude !== undefined ? `SRID=4326;POINT(${data.longitude} ${data.latitude})` : null; const content = await client.query<{ id: string }>('INSERT INTO content (title, content_type, description, poster_url, poster_horizontal_url, rating, genre, category, is_exclusive_vip, status, origin, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,\'APPROVED\',ST_GeogFromText($10),$11) RETURNING id', [data.title, data.contentType, data.description, data.posterUrl, data.posterHorizontalUrl ?? null, data.rating, data.genre, data.category, data.isExclusiveVip, origin, userId ?? null]); await client.query('INSERT INTO episodes (content_id, episode_number, title, duration_seconds, hls_manifest_url, is_free_preview, subtitle_languages, dubbing_languages) VALUES ($1, 1, $2, $3, $4, true, $5, $6)', [content.rows[0].id, data.episodeTitle, data.durationSeconds, data.hlsManifestUrl, data.subtitleLanguages, data.dubbingLanguages]); await client.query('COMMIT'); await audit(userId, 'CONTENT_CREATED', 'CONTENT', content.rows[0].id, { contentType: data.contentType }); return { id: content.rows[0].id }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function updateContentStatus(id: string, status: string, userId?: string) { const parsed = z.enum(contentStatuses).parse(status); const result = await pool.query('UPDATE content SET status = $1, updated_at = now() WHERE id = $2', [parsed, id]); if (!result.rowCount) throw Object.assign(new Error('Content not found'), { statusCode: 404 }); await audit(userId, `CONTENT_${parsed}`, 'CONTENT', id, { status: parsed }); return { id, status: parsed }; }

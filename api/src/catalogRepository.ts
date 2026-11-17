@@ -1,7 +1,8 @@
 import { pool } from './db.js';
+import { EPISODE_COIN_PRICE } from './coins.js';
 import { signPlaybackUrl } from './mediaStorage.js';
 
-export interface EpisodeRecord { id: string; title: string; duration: string; rating: string; requiresVip: boolean }
+export interface EpisodeRecord { id: string; title: string; duration: string; rating: string; requiresVip: boolean; canBuyWithCoins: boolean; coinPrice: number; subtitleLanguages: string[]; dubbingLanguages: string[] }
 export interface DramaRecord { id: string; title: string; contentType: 'MOVIE' | 'SERIES'; category: string; genre: string; rating: string; badge: 'VIP' | 'FREE'; posterUrl?: string; posterHorizontalUrl?: string; creatorName?: string; createdAt: string; trendingViews: number; description: string; episodes: EpisodeRecord[] }
 
 export interface ContinueWatchingRecord {
@@ -32,12 +33,16 @@ export async function listDramas(): Promise<DramaRecord[]> {
         WHERE te.content_id = c.id AND w.created_at >= now() - interval '30 days') AS "trendingViews",
       COALESCE(json_agg(json_build_object('id', e.id, 'title', 'Episode ' || e.episode_number || ': ' || e.title,
         'duration', ROUND(e.duration_seconds / 60.0)::text || ' min', 'rating', c.rating,
-        'requiresVip', c.is_exclusive_vip OR NOT e.is_free_preview)
+        'requiresVip', c.is_exclusive_vip OR NOT e.is_free_preview,
+        'canBuyWithCoins', NOT c.is_exclusive_vip AND NOT e.is_free_preview,
+        'coinPrice', CASE WHEN NOT c.is_exclusive_vip AND NOT e.is_free_preview THEN $1 ELSE 0 END,
+        'subtitleLanguages', e.subtitle_languages,
+        'dubbingLanguages', e.dubbing_languages)
         ORDER BY e.episode_number) FILTER (WHERE e.id IS NOT NULL), '[]') AS episodes
     FROM content c LEFT JOIN episodes e ON e.content_id = c.id
       LEFT JOIN users u ON u.id = c.created_by
     WHERE c.status = 'APPROVED' AND NOT c.is_archived
-    GROUP BY c.id, u.name ORDER BY c.created_at DESC`);
+    GROUP BY c.id, u.name ORDER BY c.created_at DESC`, [EPISODE_COIN_PRICE]);
   return rows.map((row) => ({
     id: row.id,
     title: row.title,

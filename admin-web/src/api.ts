@@ -60,6 +60,8 @@ export const api = {
   contentArchive: (id: string, archived: boolean) => request<any>(`/admin/content/${id}/archive`, { method: 'PATCH', body: JSON.stringify({ archived }) }),
   deleteContent: (id: string) => request<any>(`/admin/content/${id}`, { method: 'DELETE' }),
   createContent: (payload: unknown) => request<any>('/admin/content', { method: 'POST', body: JSON.stringify(payload) }),
+  industryProjects: (status = 'IN_REVIEW') => request<any[]>(`/admin/industry/projects?status=${encodeURIComponent(status)}`),
+  industryProjectStatus: (id: string, status: 'APPROVED' | 'REJECTED' | 'ARCHIVED') => request<any>(`/admin/industry/projects/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   campaignStatus: (id: string, status: string) => request<any>(`/admin/campaigns/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   payoutStatus: (id: string, status: string) => request<any>(`/admin/payouts/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   supportStatus: (id: string, status: string) => request<any>(`/admin/support/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),

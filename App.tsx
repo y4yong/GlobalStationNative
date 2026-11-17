@@ -28,12 +28,13 @@ import { DramaItem } from './src/data/models/Drama';
 import { COLORS } from './src/theme/colors';
 import { ProtectedVideoPlayer } from './src/components/ProtectedVideoPlayer';
 import { getDueAdBreak, PlaybackAdBreak } from './src/core/playback/adBreakSchedule';
-import { AdPayload, addCreatorEpisode, archiveCreatorContent, createAdvertiserCampaign, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, setAdPreferences, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview } from './src/api/client';
+import { AdPayload, addCreatorEpisode, archiveCreatorContent, CoinWallet, createAdvertiserCampaign, createAdvertiserUpload, createCoinCheckout, createCreatorPosterUpload, createCreatorUpload, createSupportTicket, createVipCheckout, deleteCreatorContent, getAdPayload, getCatalog, getCoinWallet, getContinueWatching, getCreatorDashboard, getCurrentSubscription, getViewerProfile, listAdvertiserCampaigns, listSupportTickets, loginViewer, purchaseEpisodeWithCoins, recordAdClick, recordAdProgress, registerViewer, requestCreatorPayout, searchCatalog, setLocationAnalyticsEnabled, submitCreatorContent, updateCreatorContent, upgradeViewerRole, ViewerProfile, CreatorSubmission, ContinueWatchingItem, getNotifications, getNotificationPreferences, getReferralOverview, markAllNotificationsRead, markNotificationRead, updateNotificationPreferences, InAppNotification, NotificationPreferences, ReferralOverview, createIndustryConnection, createMarketplaceInterest, createMarketplaceProject, generateStoryIdea, getIndustryConnections, getIndustryPeople, getIndustryProfile, getMarketplaceInterests, getMarketplaceProjects, respondToIndustryConnection, saveIndustryProfile, updateMarketplaceInterest, IndustryConnection, IndustryPerson, IndustryProfile, MarketplaceInterest, MarketplaceProject, MarketplaceNeed } from './src/api/client';
 import { clearSession, readSession } from './src/core/security/sessionStorage';
 import { requestViewingLocationPermission } from './src/core/location/viewingLocation';
 import { formatDate } from './src/core/formatDate';
 import { CONTENT_CATEGORIES, CONTENT_GENRES } from './src/data/contentOptions';
 import { isShortEpisodeDuration } from './src/data/episodeDuration';
+import { getEpisodeNavigation } from './src/data/episodeNavigation';
 
 const Text = ({ style, ...props }: TextProps) => {
   return <NativeText {...props} style={[style, {
@@ -48,6 +49,7 @@ const TextInput = ({ style, ...props }: TextInputProps) => {
     minHeight: Math.max(typeof minHeight === 'number' ? minHeight : 0, 48),
   }]} />;
 };
+const MEDIA_TRACK_LANGUAGES = ['Malay', 'English', 'Mandarin', 'Tamil', 'Indonesian', 'Japanese', 'Korean', 'Thai'];
 
 export default function App() {
   const insets = useSafeAreaInsets();
@@ -59,16 +61,16 @@ export default function App() {
     alignSelf: 'center' as const,
   };
   const [activeTab, setActiveTab] = useState<'Home' | 'Search' | 'Creator' | 'Ads' | 'Profile'>('Home');
-  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode'>('Tabs');
+  const [currentScreen, setCurrentScreen] = useState<'Tabs' | 'Details' | 'Player' | 'Payout' | 'Upload' | 'Campaign' | 'Support' | 'Engagement' | 'EditCreatorContent' | 'AddCreatorEpisode' | 'IndustryHub'>('Tabs');
   const [catalog, setCatalog] = useState<DramaItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedDrama, setSelectedDrama] = useState<DramaItem | null>(null);
   const [selectedCreatorSubmission, setSelectedCreatorSubmission] = useState<CreatorSubmission | null>(null);
-  const [selectedEpisode, setSelectedEpisode] = useState('');
   const [resumeAtSeconds, setResumeAtSeconds] = useState(0);
   const [resumeEpisodeId, setResumeEpisodeId] = useState<string | null>(null);
+  const [episodeEnded, setEpisodeEnded] = useState(false);
   const [loadedVideoDuration, setLoadedVideoDuration] = useState<number | null>(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [adBreakPhase, setAdBreakPhase] = useState<'pre-roll' | PlaybackAdBreak | null>(null);
@@ -76,6 +78,8 @@ export default function App() {
   const activeAdBreak = useRef<'pre-roll' | PlaybackAdBreak | null>(null);
   const playedAdBreaks = useRef(new Set<PlaybackAdBreak>());
   const [profile, setProfile] = useState<ViewerProfile | null>(null);
+  const [coinWallet, setCoinWallet] = useState<CoinWallet | null>(null);
+  const [coinWalletError, setCoinWalletError] = useState('');
   const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
@@ -88,6 +92,24 @@ export default function App() {
       }
     }).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!profile) {
+      setCoinWallet(null);
+      setCoinWalletError('');
+      return;
+    }
+    let active = true;
+    getCoinWallet().then(wallet => {
+      if (active) {
+        setCoinWallet(wallet);
+        setCoinWalletError('');
+      }
+    }).catch(error => {
+      if (active) setCoinWalletError(error instanceof Error ? error.message : 'Unable to load coins.');
+    });
+    return () => { active = false; };
+  }, [profile?.id]);
 
   const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
@@ -126,9 +148,15 @@ export default function App() {
   }
 
   const availableTabs = [
+<<<<<<< HEAD
     { key: 'Home', icon: '⌂', label: 'Home' },
     { key: 'Search', icon: '⌕', label: 'Search' },
     ...(profile.role === 'ADMIN' || profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '✦', label: 'Studio' }] : []),
+=======
+    { key: 'Home', icon: '⌂', label: 'Watch' },
+    { key: 'Search', icon: '⚲', label: 'Discover' },
+    ...(profile.role === 'ADMIN' || profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? [{ key: 'Creator', icon: '▣', label: 'Creator' }] : []),
+>>>>>>> main
     ...(profile.role === 'ADMIN' || profile.roles?.includes('ADVERTISER') || profile.role === 'ADVERTISER' ? [{ key: 'Ads', icon: '▤', label: 'Ads' }] : []),
     { key: 'Profile', icon: '○', label: 'Profile' },
   ];
@@ -150,6 +178,18 @@ export default function App() {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const openEpisodePlayback = (drama: DramaItem, episode: DramaItem['episodes'][number], resumeAtSeconds: number) => {
+    setSelectedDrama(drama);
+    setResumeAtSeconds(resumeAtSeconds);
+    setResumeEpisodeId(episode.id);
+    setEpisodeEnded(false);
+    setLoadedVideoDuration(null);
+    playedAdBreaks.current.clear();
+    activeAdBreak.current = 'pre-roll';
+    setAdBreakPhase('pre-roll');
+    setCurrentScreen('Player');
+  };
+
   const startPlayback = (drama: DramaItem, epTitle?: string, resumeAtSeconds = 0, resumeEpisodeId?: string) => {
     const episode = resumeEpisodeId
       ? drama.episodes.find((item) => item.id === resumeEpisodeId) ?? drama.episodes[0]
@@ -158,15 +198,39 @@ export default function App() {
       Alert.alert('Playback unavailable', 'This title does not have an episode with a media source yet.');
       return;
     }
-    setSelectedDrama(drama);
-    setSelectedEpisode(episode.title);
-    setResumeAtSeconds(resumeAtSeconds);
-    setResumeEpisodeId(episode.id);
-    setLoadedVideoDuration(null);
-    playedAdBreaks.current.clear();
-    activeAdBreak.current = 'pre-roll';
-    setAdBreakPhase('pre-roll');
-    setCurrentScreen('Player');
+    if (episode.requiresVip && !profile.isVip && !coinWallet?.unlockedEpisodeIds.includes(episode.id)) {
+      if (!episode.canBuyWithCoins) {
+        Alert.alert('VIP episode', 'An active VIP membership is required to watch this exclusive episode.');
+        return;
+      }
+      const price = episode.coinPrice ?? 10;
+      Alert.alert('Unlock episode', `Use ${price} coins to unlock this episode permanently?`, [
+        { text: 'Not now', style: 'cancel' },
+        { text: `Unlock · ${price} coins`, onPress: () => {
+          void (async () => {
+            try {
+              const wallet = coinWallet ?? await getCoinWallet();
+              if (wallet.balance < price) {
+                setCoinWallet(wallet);
+                Alert.alert('Not enough coins', 'Top up your balance to unlock this episode.', [
+                  { text: 'Not now', style: 'cancel' },
+                  { text: 'Top up coins', onPress: () => { setCurrentScreen('Tabs'); setActiveTab('Profile'); } },
+                ]);
+                return;
+              }
+              const purchase = await purchaseEpisodeWithCoins(episode.id);
+              setCoinWallet({ ...wallet, balance: purchase.balance, unlockedEpisodeIds: Array.from(new Set([...wallet.unlockedEpisodeIds, episode.id])) });
+              setProfile(current => current ? { ...current, coinBalance: purchase.balance } : current);
+              openEpisodePlayback(drama, episode, resumeAtSeconds);
+            } catch (error) {
+              Alert.alert('Unable to unlock episode', error instanceof Error ? error.message : 'Please try again.');
+            }
+          })();
+        } },
+      ]);
+      return;
+    }
+    openEpisodePlayback(drama, episode, resumeAtSeconds);
   };
 
   const handlePlaybackProgress = (currentTime: number, duration: number) => {
@@ -184,6 +248,8 @@ export default function App() {
     activeAdBreak.current = null;
     setAdBreakPhase(null);
   };
+  const episodeNavigation = getEpisodeNavigation(selectedDrama?.episodes ?? [], resumeEpisodeId);
+  const { currentIndex: currentEpisodeIndex, current: currentEpisode, next: nextEpisode } = episodeNavigation;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -254,20 +320,22 @@ export default function App() {
                 ? `Episodes · ${selectedDrama.episodes.length} so far`
                 : 'Episodes'}
             </Text>
-            {selectedDrama.episodes.map((ep) => (
+            {selectedDrama.episodes.map((ep, index) => (
               <View key={ep.id} style={styles.episodeCard}>
                 <View style={{ flex: 1 }}>
+                  {selectedDrama.contentType === 'SERIES' && <Text style={styles.episodeNumber}>EPISODE {index + 1}</Text>}
                   <View style={styles.episodeTitleRow}>
                     <Text style={styles.episodeTitle}>{ep.title}</Text>
-                    {ep.requiresVip && <Text style={styles.vipTitleLabel}>VIP</Text>}
+                    {ep.requiresVip && <Text style={styles.vipTitleLabel}>{coinWallet?.unlockedEpisodeIds.includes(ep.id) ? 'UNLOCKED' : ep.canBuyWithCoins && !profile.isVip ? `${ep.coinPrice ?? 10} COINS` : 'VIP'}</Text>}
                   </View>
                   <Text style={styles.episodeMeta}>{ep.duration} • {ep.rating}</Text>
+                  {!!(ep.subtitleLanguages?.length || ep.dubbingLanguages?.length) && <Text style={styles.episodeMeta}>Subtitles: {ep.subtitleLanguages?.join(', ') || '—'} · Dubs: {ep.dubbingLanguages?.join(', ') || '—'}</Text>}
                 </View>
                 <TouchableOpacity
                   style={styles.cyanSmallBtn}
                   onPress={() => startPlayback(selectedDrama, ep.title)}
                 >
-                  <Text style={styles.cyanSmallBtnText}>Play</Text>
+                  <Text style={styles.cyanSmallBtnText}>{ep.canBuyWithCoins && !profile.isVip && !coinWallet?.unlockedEpisodeIds.includes(ep.id) ? `${ep.coinPrice ?? 10} coins` : 'Play'}</Text>
                 </TouchableOpacity>
               </View>
             ))}
@@ -289,12 +357,14 @@ export default function App() {
             adFullscreen && styles.videoStageFullscreen,
           ]}>
             <ProtectedVideoPlayer
-              episodeId={selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)!.id}
+              key={currentEpisode?.id}
+              episodeId={currentEpisode?.id ?? ''}
               paused={adBreakPhase !== null}
               startTime={resumeAtSeconds}
               onDurationChange={setLoadedVideoDuration}
               shareViewingLocation={profile.locationAnalyticsEnabled}
               onPlaybackProgress={handlePlaybackProgress}
+              onPlaybackEnded={() => setEpisodeEnded(true)}
             />
             {adBreakPhase !== null && <AdBreak
               key={adBreakPhase}
@@ -303,17 +373,38 @@ export default function App() {
               onToggleFullscreen={() => setAdFullscreen(current => !current)}
             />}
             <View pointerEvents="none" style={styles.watermarkContainer}>
-              <Text style={styles.watermarkText}>GLOBAL STATION</Text>
+              <Text style={styles.watermarkText}>CINEVA</Text>
             </View>
           </View>
           {!adFullscreen && <ScrollView style={styles.playerInfoScroll} contentContainerStyle={styles.playerInfoContent}>
             <Text style={styles.playerVideoTitle}>{selectedDrama.title}</Text>
-            <Text style={styles.playerEpisodeTitle}>{selectedDrama.episodes.find((episode) => episode.title === selectedEpisode)?.title ?? selectedEpisode}</Text>
+            <Text style={styles.playerEpisodeTitle}>
+              {selectedDrama.contentType === 'SERIES'
+                ? `Episode ${currentEpisodeIndex + 1} of ${selectedDrama.episodes.length} · ${currentEpisode?.title ?? ''}`
+                : currentEpisode?.title}
+            </Text>
+            {selectedDrama.contentType === 'SERIES' && nextEpisode && (
+              <View style={styles.nextEpisodeCard}>
+                <View style={styles.nextEpisodeCopy}>
+                  <Text style={styles.nextEpisodeEyebrow}>{episodeEnded ? 'EPISODE COMPLETE' : 'UP NEXT'}</Text>
+                  <Text numberOfLines={1} style={styles.nextEpisodeTitle}>Episode {currentEpisodeIndex + 2} · {nextEpisode.title}</Text>
+                  <Text style={styles.nextEpisodeMeta}>{nextEpisode.duration} · {nextEpisode.rating}</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Play episode ${currentEpisodeIndex + 2}`}
+                  style={styles.nextEpisodeButton}
+                  onPress={() => startPlayback(selectedDrama, undefined, 0, nextEpisode.id)}
+                >
+                  <Text style={styles.nextEpisodeButtonText}>{episodeEnded ? 'Continue' : 'Next'} ›</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             <View style={styles.publisherRow}>
               <View style={styles.publisherAvatar}>
-                <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'Global Station').trim().slice(0, 1).toUpperCase()}</Text>
+                <Text style={styles.publisherAvatarText}>{(selectedDrama.creatorName || 'CINEVA').trim().slice(0, 1).toUpperCase()}</Text>
               </View>
-              <Text style={styles.publisherName}>{selectedDrama.creatorName || 'Global Station'}</Text>
+              <Text style={styles.publisherName}>{selectedDrama.creatorName || 'CINEVA'}</Text>
             </View>
             {!!selectedDrama.description?.trim() && <>
               <Text style={styles.playerDescriptionLabel}>About this video</Text>
@@ -321,6 +412,8 @@ export default function App() {
             </>}
           </ScrollView>}
         </View>
+      ) : currentScreen === 'IndustryHub' ? (
+        <IndustryHubScreen profile={profile} onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Payout' ? (
         <PayoutScreen onBack={() => setCurrentScreen('Tabs')} />
       ) : currentScreen === 'Upload' ? (
@@ -368,7 +461,7 @@ export default function App() {
             onAddEpisode={submission => { setSelectedCreatorSubmission(submission); setCurrentScreen('AddCreatorEpisode'); }}
           />}
           {activeTab === 'Ads' && <AdsTabView onCampaign={() => setCurrentScreen('Campaign')} />}
-          {activeTab === 'Profile' && <ProfileTabView profile={profile} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onAdPreferences={async (preferences) => { await setAdPreferences(preferences); const updated = await getViewerProfile(); setProfile(updated); }} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
+          {activeTab === 'Profile' && <ProfileTabView profile={profile} coinWallet={coinWallet} coinWalletError={coinWalletError} onRefreshCoins={async () => { const wallet = await getCoinWallet(); setCoinWallet(wallet); setCoinWalletError(''); setProfile(current => current ? { ...current, coinBalance: wallet.balance } : current); }} onCoinCheckout={async (pack) => { const checkout = await createCoinCheckout(pack); await Linking.openURL(checkout.paymentUrl); }} onSupport={() => setCurrentScreen('Support')} onEngagement={() => setCurrentScreen('Engagement')} onRefreshProfile={async () => { const updated = await getViewerProfile(); setProfile(updated); }} onUpgradeRole={async (role) => { const updated = await upgradeViewerRole(role); setProfile(updated); }} onSignOut={async () => { await clearSession(); setProfile(null); setCurrentScreen('Tabs'); setActiveTab('Home'); }} />}
         </View>
       )}
 
@@ -405,17 +498,34 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const [signupAdPersonalization, setSignupAdPersonalization] = useState(false);
+  const [signupAdAgeRange, setSignupAdAgeRange] = useState('');
+  const [signupAdGender, setSignupAdGender] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   async function submit() {
+    if (registering && signupAdPersonalization && (!signupAdAgeRange || !signupAdGender)) {
+      setError('Choose an age range and gender, or leave personalized ads turned off.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
       const profile = registering
-        ? await registerViewer(name, email, password, referralCode.trim() || undefined)
+        ? await registerViewer(
+          name,
+          email,
+          password,
+          referralCode.trim() || undefined,
+          {
+            enabled: signupAdPersonalization,
+            ageRange: signupAdPersonalization ? signupAdAgeRange as NonNullable<ViewerProfile['adAgeRange']> : null,
+            gender: signupAdPersonalization ? signupAdGender as NonNullable<ViewerProfile['adGender']> : null,
+          },
+        )
         : await loginViewer(email, password);
       onAuthenticated(profile);
     } catch (requestError) {
@@ -429,17 +539,50 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
     <SafeAreaView style={[styles.container, { justifyContent: 'center', padding: 24 }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bg} />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+<<<<<<< HEAD
         <Text style={styles.authLogo}>GLOBAL STATION</Text>
         <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Join Global Station' : 'Welcome back'}</Text>
         <Text style={styles.screenSubTitle}>{registering ? 'Create an account to get started.' : 'Sign in to continue watching.'}</Text>
+=======
+        <Text style={styles.authLogo}>CINEVA</Text>
+        <Text style={[styles.screenMainTitle, { marginTop: 24 }]}>{registering ? 'Create your account' : 'Sign in'}</Text>
+        <Text style={styles.screenSubTitle}>Your account connects to CINEVA.</Text>
+>>>>>>> main
         {registering && <TextInput placeholder="Full name" placeholderTextColor={COLORS.textDim} autoCapitalize="words" value={name} onChangeText={setName} style={styles.flowInput} />}
         <TextInput placeholder="Email" placeholderTextColor={COLORS.textDim} autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} style={[styles.flowInput, { marginTop: 14 }]} />
         <TextInput placeholder="Password (at least 8 characters)" placeholderTextColor={COLORS.textDim} secureTextEntry value={password} onChangeText={setPassword} style={[styles.flowInput, { marginTop: 14 }]} />
         {registering && <TextInput placeholder="Referral code (e.g. GS-ABC123)" placeholderTextColor={COLORS.textDim} autoCapitalize="characters" autoCorrect={false} maxLength={40} value={referralCode} onChangeText={value => setReferralCode(value.toUpperCase().replace(/\s/g, ''))} style={[styles.flowInput, { marginTop: 14 }]} />}
+<<<<<<< HEAD
         {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>You can add creator or advertiser tools later.</Text>}
+=======
+        {registering && <View style={styles.signupAdPreferences}>
+          <Text style={styles.signupAdTitle}>Personalized ads</Text>
+          <Text style={styles.signupAdDescription}>Optional. Choose whether CINEVA may use your age range and gender to tailor ads. You can change this anytime in Profile.</Text>
+          <View style={styles.signupAdConsentRow}>
+            <Text style={styles.signupAdConsentText}>Allow age and gender ad personalization</Text>
+            <Switch
+              accessibilityLabel="Allow age and gender ad personalization during signup"
+              value={signupAdPersonalization}
+              onValueChange={setSignupAdPersonalization}
+              trackColor={{ false: '#dce5df', true: COLORS.cyanDark }}
+              thumbColor={signupAdPersonalization ? COLORS.cyan : '#cbd5e1'}
+            />
+          </View>
+          {signupAdPersonalization && <>
+            <SelectField label="Age range" value={signupAdAgeRange || 'Select age range'} options={['18-24', '25-34', '35-44', '45+']} onChange={setSignupAdAgeRange} />
+            <SelectField label="Gender" value={signupAdGender || 'Select gender'} options={['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY']} onChange={setSignupAdGender} />
+          </>}
+        </View>}
+        {registering && <Text style={[styles.screenSubTitle, { marginTop: 14 }]}>Every new account starts as a Basic user. You can request more account roles from your profile.</Text>}
+>>>>>>> main
         {!!error && <Text style={{ color: COLORS.danger, marginTop: 14 }}>{error}</Text>}
         <TouchableOpacity style={[styles.cyanPrimaryBtn, { marginTop: 20 }]} disabled={busy} onPress={() => {
           if (registering) {
+            if (signupAdPersonalization && (!signupAdAgeRange || !signupAdGender)) {
+              setError('Choose an age range and gender, or leave personalized ads turned off.');
+              return;
+            }
+            setError('');
             setTermsAccepted(false);
             setTermsVisible(true);
           } else {
@@ -449,13 +592,17 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (profile: ViewerProf
           <Text style={styles.cyanPrimaryBtnText}>{busy ? (registering ? 'Creating account…' : 'Signing in…') : registering ? 'Create account' : 'Sign in'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={{ alignItems: 'center', padding: 16 }} onPress={() => { setRegistering(!registering); setError(''); }}>
+<<<<<<< HEAD
           <Text style={{ color: COLORS.cyan }}>{registering ? 'Already a member? Sign in' : 'Create an account'}</Text>
+=======
+          <Text style={{ color: COLORS.cyan }}>{registering ? 'Already have an account? Sign in' : 'New to CINEVA? Create account'}</Text>
+>>>>>>> main
         </TouchableOpacity>
       </ScrollView>
       <TermsAcceptanceModal
         visible={termsVisible}
         title="Terms and Conditions"
-        subject="Global Station account"
+        subject="CINEVA account"
         accepted={termsAccepted}
         onToggleAccepted={() => setTermsAccepted(value => !value)}
         onAccept={() => { setTermsVisible(false); void submit(); }}
@@ -485,10 +632,10 @@ function TermsAcceptanceModal({ visible, title, subject, accepted, onToggleAccep
           <Text style={styles.selectModalTitle}>{title}</Text>
           <Text style={styles.termsDraftNotice}>Draft placeholder — replace this text with the final {subject.toLowerCase()} terms before launch.</Text>
           <ScrollView style={styles.termsBody} contentContainerStyle={styles.termsBodyContent}>
-            <Text style={styles.termsSectionTitle}>Using Global Station</Text>
+            <Text style={styles.termsSectionTitle}>Using CINEVA</Text>
             <Text style={styles.termsCopy}>Use your account lawfully and keep your sign-in details secure. You are responsible for activity performed through your account.</Text>
             <Text style={styles.termsSectionTitle}>Your content and activity</Text>
-            <Text style={styles.termsCopy}>Only upload or share material you have the right to use. Global Station features and availability may change as the service is developed.</Text>
+            <Text style={styles.termsCopy}>Only upload or share material you have the right to use. CINEVA features and availability may change as the service is developed.</Text>
             <Text style={styles.termsSectionTitle}>Final terms to be added</Text>
             <Text style={styles.termsCopy}>The complete terms, privacy details, eligibility requirements, and any role-specific conditions will be provided here by the service owner.</Text>
           </ScrollView>
@@ -582,10 +729,18 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
     <ScrollView contentContainerStyle={{ paddingBottom: 90 }}>
       {/* Brand Header */}
       <View style={styles.brandHeader}>
-        <Text style={styles.brandTitle}>GLOBAL STATION</Text>
+        <View>
+          <Text style={styles.brandTitle}>CINEVA</Text>
+          <Text style={styles.brandTagline}>MALAYSIAN STORIES. MADE TO BINGE.</Text>
+        </View>
         <View style={styles.headerRightIcons}>
+<<<<<<< HEAD
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Search" onPress={onSearch}><Text style={styles.iconTxt}>⌕</Text></TouchableOpacity>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Profile" onPress={onProfile}><Text style={styles.iconTxt}>◎</Text></TouchableOpacity>
+=======
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Search" style={styles.headerIconButton} onPress={onSearch}><Text style={styles.iconTxt}>⌕</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Profile" style={styles.headerIconButton} onPress={onProfile}><Text style={styles.iconTxt}>◉</Text></TouchableOpacity>
+>>>>>>> main
         </View>
       </View>
 
@@ -607,14 +762,25 @@ function HomeTabView({ dramas, continueWatching, loading, error, onRetry, onSele
 
       {/* Hero Banner */}
       {visibleDramas[0] && <View style={styles.heroCard}>
-        <PosterImage uri={visibleDramas[0].posterHorizontalUrl ?? visibleDramas[0].posterUrl} title={visibleDramas[0].title} style={styles.heroPosterImage} />
+        <View style={styles.heroArtwork}>
+          <PosterImage uri={visibleDramas[0].posterUrl ?? visibleDramas[0].posterHorizontalUrl} title={visibleDramas[0].title} style={styles.heroPosterImage} />
+          <View style={styles.heroBadge}><Text style={styles.heroBadgeText}>{visibleDramas[0].contentType === 'SERIES' ? 'FEATURED SERIES' : 'FEATURED FILM'}</Text></View>
+        </View>
         <View style={styles.heroGradient}>
+          <Text style={styles.heroEyebrow}>{visibleDramas[0].category.toUpperCase()}</Text>
           <Text style={styles.heroDramaTitle}>{visibleDramas[0].title}</Text>
-          <Text style={styles.heroSub}>{visibleDramas[0].genre} • {visibleDramas[0].rating}</Text>
+          <Text numberOfLines={3} style={styles.heroSub}>{visibleDramas[0].genre} · {visibleDramas[0].rating}{visibleDramas[0].contentType === 'SERIES' ? ` · ${visibleDramas[0].episodes.length} episodes` : ''}</Text>
 
           <View style={styles.heroBtnRow}>
             <TouchableOpacity style={styles.cyanActionBtn} onPress={() => onPlay(visibleDramas[0])}>
+<<<<<<< HEAD
               <Text style={styles.cyanActionBtnText}>▶ Watch now</Text>
+=======
+              <Text style={styles.cyanActionBtnText}>▶  {visibleDramas[0].contentType === 'SERIES' ? 'Watch Episode 1' : 'Watch now'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.heroDetailsBtn} onPress={() => onSelect(visibleDramas[0])}>
+              <Text style={styles.heroDetailsText}>View details  ›</Text>
+>>>>>>> main
             </TouchableOpacity>
           </View>
         </View>
@@ -701,8 +867,14 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
   const activeFilterCount = [selectedGenre, selectedCategory, selectedType].filter(value => value !== 'All').length;
 
   return (
+<<<<<<< HEAD
     <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 112 }}>
       <Text style={styles.screenMainTitle}>Search</Text>
+=======
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 90 }}>
+      <Text style={styles.screenMainTitle}>Discover</Text>
+      <Text style={styles.screenSubTitle}>Find titles by name, genre, category, or type.</Text>
+>>>>>>> main
       <View style={styles.searchBar}>
         <Text style={styles.searchBarIcon}>⚲</Text>
         <TextInput
@@ -779,6 +951,259 @@ function SearchTabView({ dramas, loading, onSelect }: { dramas: DramaItem[]; loa
       ))}
       {!loading && filtered.length === 0 && <Text style={styles.emptyCatalog}>No titles found.</Text>}
     </ScrollView>
+  );
+}
+
+function IndustryHubScreen({ profile, onBack }: { profile: ViewerProfile; onBack: () => void }) {
+  const sections = ['Discover', 'Connect', 'Invest', 'Create'] as const;
+  const [section, setSection] = useState<(typeof sections)[number]>('Discover');
+  const [industryProfile, setIndustryProfile] = useState<IndustryProfile | null>(null);
+  const [people, setPeople] = useState<IndustryPerson[]>([]);
+  const [connections, setConnections] = useState<IndustryConnection[]>([]);
+  const [projects, setProjects] = useState<MarketplaceProject[]>([]);
+  const [interests, setInterests] = useState<MarketplaceInterest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [organization, setOrganization] = useState('');
+  const [industryRole, setIndustryRole] = useState('');
+  const [bio, setBio] = useState('');
+  const [region, setRegion] = useState('Malaysia');
+  const [title, setTitle] = useState('');
+  const [summary, setSummary] = useState('');
+  const [storyPrompt, setStoryPrompt] = useState('');
+  const [investmentTarget, setInvestmentTarget] = useState('');
+  const [selectedNeeds, setSelectedNeeds] = useState<MarketplaceNeed[]>(['FUNDING', 'SUBTITLING', 'DUBBING']);
+  const [interestMessage, setInterestMessage] = useState('');
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [savedProfile, directory, requestList, discoverProjects, myProjects, investorProjects, interestList] = await Promise.all([
+        getIndustryProfile(),
+        getIndustryPeople(),
+        getIndustryConnections(),
+        getMarketplaceProjects('DISCOVER'),
+        getMarketplaceProjects('MINE'),
+        getMarketplaceProjects('INVEST'),
+        getMarketplaceInterests(),
+      ]);
+      setIndustryProfile(savedProfile);
+      setPeople(directory);
+      setConnections(requestList);
+      setProjects(section === 'Create' ? myProjects : section === 'Invest' ? investorProjects : discoverProjects);
+      setInterests(interestList);
+      setOrganization(savedProfile?.organization ?? '');
+      setIndustryRole(savedProfile?.industryRole ?? (profile.roles?.includes('CREATOR') || profile.role === 'CREATOR' ? 'Creator' : 'Film & television professional'));
+      setBio(savedProfile?.bio ?? '');
+      setRegion(savedProfile?.region ?? 'Malaysia');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load the Industry Hub.');
+    } finally {
+      setLoading(false);
+    }
+  }, [profile.role, profile.roles, section]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function runAction(action: () => Promise<unknown>, successMessage: string) {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await action();
+      setNotice(successMessage);
+      await refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'The request could not be completed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitProfile() {
+    if (industryRole.trim().length < 2) {
+      setError('Add your role or specialty to create an Industry Hub profile.');
+      return;
+    }
+    await runAction(
+      () => saveIndustryProfile({ organization: organization.trim(), industryRole: industryRole.trim(), bio: bio.trim(), region: region.trim() || 'Malaysia' }),
+      'Your industry profile is saved.',
+    );
+  }
+
+  async function submitProject() {
+    if (title.trim().length < 3 || summary.trim().length < 20) {
+      setError('Add a project title and a synopsis of at least 20 characters.');
+      return;
+    }
+    if (investmentTarget.trim() && (!Number.isFinite(Number(investmentTarget)) || Number(investmentTarget) <= 0)) {
+      setError('Enter a valid positive investment target in RM, or leave it blank.');
+      return;
+    }
+    await runAction(() => createMarketplaceProject({
+      title: title.trim(),
+      summary: summary.trim(),
+      kind: 'PROJECT',
+      format: 'VERTICAL_SERIES',
+      category: 'Malaysian Original',
+      stage: 'IDEA',
+      seeking: selectedNeeds,
+      regions: ['MY', 'SG', 'ID'],
+      subtitleLanguages: ['English', 'Malay'],
+      dubbingLanguages: ['English', 'Malay'],
+      investmentTarget: investmentTarget.trim() ? Number(investmentTarget) : null,
+    }), 'Pitch submitted for CINEVA review.');
+    setTitle('');
+    setSummary('');
+  }
+
+  async function makeStoryIdea() {
+    if (storyPrompt.trim().length < 10) {
+      setError('Describe your story in at least 10 characters before generating an idea.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const idea = await generateStoryIdea(storyPrompt);
+      setTitle(idea.title);
+      setSummary(idea.summary);
+      setNotice('Story idea generated. Review and edit it before submitting your pitch.');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to generate a story idea.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ownsIncomingInterest = (interest: MarketplaceInterest) => interest.isOwner && interest.status === 'PENDING';
+  const needs: MarketplaceNeed[] = ['CO_PRODUCTION', 'TALENT', 'FUNDING', 'SUBTITLING', 'DUBBING', 'LOCAL_ADAPTATION', 'LICENSING', 'OTT_DISTRIBUTION'];
+  const pretty = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+  const canPitch = profile.role === 'ADMIN' || profile.role === 'CREATOR' || profile.roles?.includes('CREATOR');
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.topHeader}>
+        <TouchableOpacity style={styles.headerBackButton} onPress={onBack}><Text style={styles.backBtnText}>‹ Back to Discover</Text></TouchableOpacity>
+        <Text style={styles.screenMainTitle}>Industry Hub</Text>
+      </View>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+        <Text style={styles.screenSubTitle}>Connect Malaysian stories with talent, partners, audiences, and regional opportunities.</Text>
+        <View style={{ flexDirection: 'row', gap: 7, marginVertical: 16 }}>
+          {sections.map(item => (
+            <TouchableOpacity key={item} accessibilityRole="button" accessibilityState={{ selected: section === item }} onPress={() => setSection(item)} style={{ flex: 1, minHeight: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: section === item ? COLORS.cyan : COLORS.cardBorder, backgroundColor: section === item ? COLORS.cyanSoft : COLORS.cardBg }}>
+              <Text style={{ color: section === item ? COLORS.cyan : COLORS.textDim, fontSize: 11, fontWeight: '700' }}>{item}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {!!error && <Text style={styles.errorText}>{error}</Text>}
+        {!!notice && <Text style={[styles.screenSubTitle, { marginBottom: 10 }]}>{notice}</Text>}
+        {loading && <ActivityIndicator color={COLORS.cyan} />}
+
+        {!loading && section === 'Discover' && <>
+          <Text style={styles.sectionHeaderTitle}>Malaysian originals · regional reach</Text>
+          <Text style={styles.screenSubTitle}>Browse vetted scripts, IP, and projects seeking co-production, localization, licensing, or OTT distribution.</Text>
+          {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{project.title}</Text>
+            <Text style={styles.creatorMeta}>{project.category} · {pretty(project.format)} · {pretty(project.stage)}</Text>
+            <Text style={[styles.creatorMeta, { marginTop: 8 }]}>{project.summary}</Text>
+            <Text style={[styles.creatorMeta, { marginTop: 8 }]}>Seeking: {project.seeking.map(pretty).join(' · ') || 'Regional partners'}</Text>
+            <Text style={styles.creatorMeta}>Subtitles: {project.subtitleLanguages.join(', ') || 'On request'} · Dubbing: {project.dubbingLanguages.join(', ') || 'On request'}</Text>
+            <Text style={styles.creatorMeta}>Regions: {project.regions.join(', ')}</Text>
+            {!project.hasExpressedInterest && project.creatorId !== profile.id && <TouchableOpacity style={styles.secondaryFlowBtn} disabled={busy} onPress={() => void runAction(() => createMarketplaceInterest(project.id, null, interestMessage.trim()), 'Your interest was sent to the project creator.')}>
+              <Text style={styles.secondaryFlowText}>Contact creator · no funds transferred</Text>
+            </TouchableOpacity>}
+          </View>)}
+          {!projects.length && <Text style={styles.emptyCatalog}>Approved pitches will appear here as creators submit them.</Text>}
+        </>}
+
+        {!loading && section === 'Connect' && <>
+          <View style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{industryProfile ? 'Your Industry Hub profile' : 'Create your industry profile'}</Text>
+            <TextInput value={industryRole} onChangeText={setIndustryRole} placeholder="Role or specialty" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={organization} onChangeText={setOrganization} placeholder="Company or organization (optional)" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={region} onChangeText={setRegion} placeholder="Region" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+            <TextInput value={bio} onChangeText={setBio} placeholder="Short bio (optional)" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 76, textAlignVertical: 'top' }]} multiline />
+            <TouchableOpacity style={styles.uploadBtn} disabled={busy} onPress={() => void submitProfile()}><Text style={styles.uploadBtnText}>{busy ? 'Saving…' : 'Save profile'}</Text></TouchableOpacity>
+          </View>
+          <Text style={styles.sectionHeaderTitle}>People to connect with</Text>
+          {people.map(person => <View key={person.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{person.name}</Text>
+            <Text style={styles.creatorMeta}>{person.industryRole}{person.organization ? ` · ${person.organization}` : ''} · {person.region}</Text>
+            {!!person.bio && <Text style={styles.creatorMeta}>{person.bio}</Text>}
+            {person.connectionStatus ? <Text style={styles.creatorMeta}>Connection: {pretty(person.connectionStatus)}</Text> :
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => createIndustryConnection(person.id, 'I would like to connect about Malaysian and Southeast Asian stories on CINEVA.'), 'Connection request sent.')}>
+                <Text style={styles.creatorDetailsAction}>Connect</Text>
+              </TouchableOpacity>}
+          </View>)}
+          {connections.filter(item => item.status === 'PENDING').map(request => <View key={request.id} style={styles.creatorContentCard}>
+            <Text style={styles.creatorMeta}>{request.peerName} · {request.message || 'Connection request'}</Text>
+            {request.requesterId !== profile.id && <View style={{ flexDirection: 'row', gap: 18, marginTop: 8 }}>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => respondToIndustryConnection(request.id, 'ACCEPTED'), 'Connection accepted.')}><Text style={styles.creatorDetailsAction}>Accept</Text></TouchableOpacity>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => respondToIndustryConnection(request.id, 'DECLINED'), 'Connection declined.')}><Text style={styles.creatorDeleteAction}>Decline</Text></TouchableOpacity>
+            </View>}
+          </View>)}
+          {!people.length && <Text style={styles.emptyCatalog}>Opt-in industry profiles will appear here.</Text>}
+        </>}
+
+        {!loading && section === 'Invest' && <>
+          <Text style={styles.screenSubTitle}>Express interest to start a conversation. This feature records an inquiry only; it does not transfer or hold money.</Text>
+          <TextInput value={interestMessage} onChangeText={setInterestMessage} placeholder="Optional message for creators" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+          {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>{project.title}</Text>
+            <Text style={styles.creatorMeta}>{project.creatorName ?? 'CINEVA creator'} · {project.investmentTarget ? `Target RM ${Number(project.investmentTarget).toLocaleString()}` : 'Target not specified'}</Text>
+            <Text style={styles.creatorMeta}>{project.summary}</Text>
+            {project.hasExpressedInterest ? <Text style={styles.creatorMeta}>You have contacted the creator.</Text> :
+              <TouchableOpacity disabled={busy} style={styles.secondaryFlowBtn} onPress={() => void runAction(() => createMarketplaceInterest(project.id, null, interestMessage.trim()), 'Your interest was sent. No funds were transferred.')}>
+                <Text style={styles.secondaryFlowText}>Express interest · no funds transferred</Text>
+              </TouchableOpacity>}
+          </View>)}
+          {interests.filter(ownsIncomingInterest).map(interest => <View key={interest.id} style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>Inquiry for {interest.projectTitle}</Text>
+            <Text style={styles.creatorMeta}>{interest.investorName}: {interest.message || 'Interested in discussing this project.'}</Text>
+            <View style={{ flexDirection: 'row', gap: 18, marginTop: 8 }}>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => updateMarketplaceInterest(interest.id, 'ACKNOWLEDGED'), 'Inquiry acknowledged.')}><Text style={styles.creatorDetailsAction}>Acknowledge</Text></TouchableOpacity>
+              <TouchableOpacity disabled={busy} onPress={() => void runAction(() => updateMarketplaceInterest(interest.id, 'DECLINED'), 'Inquiry declined.')}><Text style={styles.creatorDeleteAction}>Decline</Text></TouchableOpacity>
+            </View>
+          </View>)}
+          {!projects.length && !interests.some(ownsIncomingInterest) && <Text style={styles.emptyCatalog}>No opportunities or investment inquiries are available yet.</Text>}
+        </>}
+
+        {!loading && section === 'Create' && <>
+          {!canPitch ? <View style={styles.creatorContentCard}>
+            <Text style={styles.searchResultTitle}>Creator Studio</Text>
+            <Text style={styles.creatorMeta}>Pitch a vertical series or generate Malaysian story ideas after upgrading your account to Creator in Profile.</Text>
+          </View> : <>
+            <Text style={styles.screenSubTitle}>Build an original 9:16 series pitch for Malaysian audiences and regional partners. New listings are reviewed before publication.</Text>
+            <View style={styles.creatorContentCard}>
+              <TextInput value={storyPrompt} onChangeText={setStoryPrompt} placeholder="Describe the characters, setting, and story direction for AI ideas" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 76, textAlignVertical: 'top' }]} multiline />
+              <TouchableOpacity disabled={busy} style={styles.secondaryFlowBtn} onPress={() => void makeStoryIdea()}><Text style={styles.secondaryFlowText}>{busy ? 'Working…' : 'Generate story idea'}</Text></TouchableOpacity>
+              <TextInput value={title} onChangeText={setTitle} placeholder="Project title" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+              <TextInput value={summary} onChangeText={setSummary} placeholder="Synopsis (at least 20 characters)" placeholderTextColor={COLORS.textDim} style={[styles.creatorPayoutInput, { minHeight: 100, textAlignVertical: 'top' }]} multiline />
+              <TextInput value={investmentTarget} onChangeText={setInvestmentTarget} keyboardType="decimal-pad" placeholder="Optional investment target (RM)" placeholderTextColor={COLORS.textDim} style={styles.creatorPayoutInput} />
+              <Text style={[styles.creatorMeta, { marginTop: 8 }]}>What are you looking for?</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 10 }}>
+                {needs.map(need => {
+                  const selected = selectedNeeds.includes(need);
+                  return <TouchableOpacity key={need} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setSelectedNeeds(current => selected ? current.filter(item => item !== need) : [...current, need])} style={{ borderWidth: 1, borderColor: selected ? COLORS.cyan : COLORS.cardBorder, borderRadius: 16, paddingVertical: 7, paddingHorizontal: 10 }}>
+                    <Text style={{ color: selected ? COLORS.cyan : COLORS.textDim, fontSize: 11 }}>{pretty(need)}</Text>
+                  </TouchableOpacity>;
+                })}
+              </View>
+              <TouchableOpacity disabled={busy} style={styles.uploadBtn} onPress={() => void submitProject()}><Text style={styles.uploadBtnText}>{busy ? 'Submitting…' : 'Submit pitch for review'}</Text></TouchableOpacity>
+            </View>
+            {projects.map(project => <View key={project.id} style={styles.creatorContentCard}>
+              <Text style={styles.searchResultTitle}>{project.title}</Text>
+              <Text style={styles.creatorMeta}>Pitch status: {pretty(project.status)}</Text>
+            </View>)}
+          </>}
+        </>}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -975,7 +1400,7 @@ function AdsTabView({ onCampaign }: { onCampaign: () => void }) {
 }
 
 // --- TAB 5: PROFILE & VIP SUBSCRIPTION ---
-function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; onSupport: () => void; onEngagement: () => void; onAdPreferences: (preferences: { enabled: boolean; ageRange: string | null; gender: ViewerProfile['adGender'] }) => Promise<void>; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
+function ProfileTabView({ profile, coinWallet, coinWalletError, onRefreshCoins, onCoinCheckout, onSupport, onEngagement, onRefreshProfile, onUpgradeRole, onSignOut }: { profile: ViewerProfile; coinWallet: CoinWallet | null; coinWalletError: string; onRefreshCoins: () => Promise<void>; onCoinCheckout: (pack: CoinWallet['packs'][number]['code']) => Promise<void>; onSupport: () => void; onEngagement: () => void; onRefreshProfile: () => Promise<void>; onUpgradeRole: (role: 'CREATOR' | 'ADVERTISER') => Promise<void>; onSignOut: () => void }) {
   const roles = Array.from(new Set(profile.roles?.length ? profile.roles : [profile.role]));
   const missingRoles = profile.role === 'ADMIN' ? [] : (['CREATOR', 'ADVERTISER'] as const).filter(role => !roles.includes(role));
   const [message, setMessage] = useState('');
@@ -983,6 +1408,7 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
   const [busyUpgrade, setBusyUpgrade] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
   const [roleToConfirm, setRoleToConfirm] = useState<'CREATOR' | 'ADVERTISER' | null>(null);
   const [roleTermsAccepted, setRoleTermsAccepted] = useState(false);
+<<<<<<< HEAD
   const [adPersonalization, setAdPersonalization] = useState(profile.adPersonalizationEnabled);
   const [adAgeRange, setAdAgeRange] = useState(profile.adAgeRange ?? '');
   const [adGender, setAdGender] = useState(profile.adGender ?? '');
@@ -995,6 +1421,23 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
     setAdGender(profile.adGender ?? '');
   }, [profile.adPersonalizationEnabled, profile.adAgeRange, profile.adGender]);
 
+=======
+  const [busyCoinPack, setBusyCoinPack] = useState<CoinWallet['packs'][number]['code'] | null>(null);
+  const [coinModalVisible, setCoinModalVisible] = useState(false);
+  const [coinMessage, setCoinMessage] = useState('');
+
+  async function buyCoins(pack: CoinWallet['packs'][number]['code']) {
+    setBusyCoinPack(pack);
+    setCoinMessage('');
+    try {
+      await onCoinCheckout(pack);
+    } catch (error) {
+      setCoinMessage(error instanceof Error ? error.message : 'Unable to open checkout.');
+    } finally {
+      setBusyCoinPack(null);
+    }
+  }
+>>>>>>> main
   async function upgradeRole(role: 'CREATOR' | 'ADVERTISER') {
     setBusyUpgrade(role);
     setMessage('');
@@ -1072,9 +1515,18 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
             <Text style={styles.profileMetaLabel}>ACCOUNT TYPE</Text>
             <Text style={styles.profileMetaValue} numberOfLines={2}>{accountType}</Text>
           </View>
+          <View style={styles.profileMetaColumn}>
+            <Text style={styles.profileMetaLabel}>COINS</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${profile.coinBalance} coins. View coin packs`} style={styles.profileCoinBalanceButton} onPress={() => { setCoinMessage(''); setCoinModalVisible(true); }}>
+              <CoinMark />
+              <Text style={styles.profileCoinBalanceValue}>{profile.coinBalance.toLocaleString()}</Text>
+              <Text style={styles.profileCoinBalanceArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
+<<<<<<< HEAD
       <View style={styles.profileSection}>
         <Text style={styles.profileSectionTitle}>Privacy & ads</Text>
         <View style={styles.profilePrivacyCard}>
@@ -1140,6 +1592,11 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
       {missingRoles.length > 0 && (
         <View style={styles.profileSection}>
           <Text style={styles.profileSectionTitle}>More tools</Text>
+=======
+      {missingRoles.length > 0 && (
+        <View style={styles.profileSection}>
+          <Text style={styles.profileSectionTitle}>More ways to use CINEVA</Text>
+>>>>>>> main
           <View style={styles.profileRoleGrid}>
             {missingRoles.includes('CREATOR') && <TouchableOpacity accessibilityRole="button" style={styles.profileRoleCard} disabled={busyUpgrade !== null} onPress={() => { setMessage(''); setRoleTermsAccepted(false); setRoleToConfirm('CREATOR'); }}>
               <Text style={styles.profileRoleIcon}>✦</Text>
@@ -1195,6 +1652,35 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
           <Text style={styles.profileRoleArrow}>›</Text>
         </TouchableOpacity>
       </View>
+      <Modal visible={coinModalVisible} transparent animationType="fade" onRequestClose={() => setCoinModalVisible(false)}>
+        <View style={styles.selectModalBackdrop}>
+          <View style={styles.coinModal}>
+            <View style={styles.coinModalHeading}>
+              <Text style={styles.selectModalTitle}>Coins</Text>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close coin packs" onPress={() => setCoinModalVisible(false)}>
+                <Text style={styles.profileRoleArrow}>×</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.coinModalBalanceRow}><CoinMark size="large" /><Text style={styles.coinModalBalance}>{profile.coinBalance.toLocaleString()} coins</Text></View>
+            {coinWalletError ? <Text style={styles.profileNotice}>{coinWalletError}</Text> : null}
+            {coinWallet?.packs.map(pack => (
+              <TouchableOpacity key={pack.code} accessibilityRole="button" style={styles.coinPackRow} disabled={busyCoinPack !== null} onPress={() => buyCoins(pack.code)}>
+                <View style={styles.coinPackInfo}><CoinMark /><Text style={styles.coinPackAmount}>{pack.label}</Text></View>
+                <Text style={styles.coinPackPrice}>{busyCoinPack === pack.code ? 'Opening…' : `RM ${pack.amount}`}</Text>
+              </TouchableOpacity>
+            ))}
+            {!coinWallet && !coinWalletError && <Text style={styles.engagementActionSub}>Loading…</Text>}
+            {!!coinMessage && <Text style={styles.profileNotice}>{coinMessage}</Text>}
+            <TouchableOpacity accessibilityRole="button" style={styles.profileRefreshButton} disabled={busyCoinPack !== null} onPress={async () => {
+              setCoinMessage('');
+              try { await onRefreshCoins(); }
+              catch (error) { setCoinMessage(error instanceof Error ? error.message : 'Unable to refresh balance.'); }
+            }}>
+              <Text style={styles.profileRefreshText}>Refresh balance</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={roleToConfirm !== null} transparent animationType="fade" onRequestClose={() => setRoleToConfirm(null)}>
         <View style={styles.selectModalBackdrop}>
           <View style={styles.termsModal}>
@@ -1231,6 +1717,17 @@ function ProfileTabView({ profile, onSupport, onEngagement, onAdPreferences, onR
         </View>
       </Modal>
     </ScrollView>
+  );
+}
+
+function CoinMark({ size = 'small' }: { size?: 'small' | 'large' }) {
+  return (
+    <View style={[styles.coinMark, size === 'large' && styles.coinMarkLarge]}>
+      <View style={[styles.coinMarkInner, size === 'large' && styles.coinMarkInnerLarge]}>
+        <Text style={[styles.coinMarkLetter, size === 'large' && styles.coinMarkLetterLarge]}>C</Text>
+      </View>
+      <View style={styles.coinMarkShine} />
+    </View>
   );
 }
 
@@ -1355,7 +1852,7 @@ function EngagementScreen({ profile, onBack, onLocationSharingChange }: { profil
     if (!referral) return;
     try {
       await Share.share({
-        message: `Join me on Global Station. Use my referral code ${referral.code} when you create your account.`,
+        message: `Join me on CINEVA. Use my referral code ${referral.code} when you create your account.`,
       });
     } catch (shareError) {
       setError(shareError instanceof Error ? shareError.message : 'Unable to share your referral code.');
@@ -1444,7 +1941,7 @@ function EngagementScreen({ profile, onBack, onLocationSharingChange }: { profil
         <Text style={styles.profileSectionTitle}>Choose your channels</Text>
         <Text style={styles.screenSubTitle}>Preferences are saved to your account. External delivery channels are not connected yet.</Text>
         {([
-          ['in_app', 'In-app notifications', 'Updates in your Global Station inbox.'],
+          ['in_app', 'In-app notifications', 'Updates in your CINEVA inbox.'],
           ['push', 'Push notifications', 'Available after push service and device permissions are configured.'],
           ['email', 'Email', 'Email delivery provider is not connected yet.'],
           ['sms', 'SMS', 'SMS provider is not connected yet.'],
@@ -1670,7 +2167,7 @@ function SelectField({ label, value, options, onChange, allowClear = false, form
   </View>;
 }
 
-function MultiSelectField({ label, values, options, onChange }: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+function MultiSelectField({ label, values, options, onChange, hint = 'Choose one or more genres.' }: { label: string; values: string[]; options: string[]; onChange: (values: string[]) => void; hint?: string }) {
   const [visible, setVisible] = useState(false);
   const toggleOption = (option: string) => {
     onChange(values.includes(option) ? values.filter((value) => value !== option) : [...values, option]);
@@ -1690,7 +2187,7 @@ function MultiSelectField({ label, values, options, onChange }: { label: string;
       </Text>
       <Text style={styles.selectChevron}>⌄</Text>
     </TouchableOpacity>
-    <Text style={styles.multiSelectHint}>Choose one or more genres.</Text>
+    <Text style={styles.multiSelectHint}>{hint}</Text>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
       <View style={styles.selectModalBackdrop}>
         <View style={styles.selectModal}>
@@ -1764,6 +2261,8 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
   const [durationSeconds, setDurationSeconds] = useState('');
   const [contentType, setContentType] = useState<'MOVIE' | 'SERIES'>('SERIES');
   const [isExclusiveVip, setIsExclusiveVip] = useState(false);
+  const [subtitleLanguages, setSubtitleLanguages] = useState<string[]>([]);
+  const [dubbingLanguages, setDubbingLanguages] = useState<string[]>([]);
   const [video, setVideo] = useState<{ path: string; name: string; size: number } | null>(null);
   const [poster, setPoster] = useState<CreatorPosterFile | null>(null);
   const [posterHorizontal, setPosterHorizontal] = useState<CreatorPosterFile | null>(null);
@@ -1819,7 +2318,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 20 + Math.round(written / Math.max(1, total) * 80))));
       if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
-      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip });
+      await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip, subtitleLanguages, dubbingLanguages });
       Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
       onBack();
     } catch (error) {
@@ -1843,6 +2342,9 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
     <SelectField label="Category" value={category} options={[...CONTENT_CATEGORIES]} onChange={setCategory} />
     <SelectField label="Rating" value={rating} options={['U', 'P12', 'P13', '16', '18']} onChange={setRating} />
     <View style={styles.flowField}><Text style={styles.flowLabel}>{contentType === 'SERIES' ? 'Episode duration (120–300 seconds)' : 'Duration (seconds)'}</Text><TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} style={styles.flowInput} keyboardType="number-pad" /></View>
+    <Text style={styles.screenSubTitle}>Select languages included in the release. These are saved as metadata; separate subtitle/audio track files are not uploaded or playable yet.</Text>
+    <MultiSelectField label="Subtitle languages" values={subtitleLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setSubtitleLanguages} hint="Choose languages present in the release." />
+    <MultiSelectField label="Dubbing audio languages" values={dubbingLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setDubbingLanguages} hint="Choose languages present in the release." />
     <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: isExclusiveVip }} style={styles.secondaryFlowBtn} disabled={busy} onPress={() => setIsExclusiveVip(!isExclusiveVip)}><Text style={styles.secondaryFlowText}>{isExclusiveVip ? '☑ VIP exclusive' : '☐ VIP exclusive'}</Text></TouchableOpacity>
     {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
     {busy && <Text style={styles.screenSubTitle}>Uploading posters and video: {progress}%</Text>}
@@ -1866,6 +2368,8 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
 }) {
   const [title, setTitle] = useState('');
   const [durationSeconds, setDurationSeconds] = useState('');
+  const [subtitleLanguages, setSubtitleLanguages] = useState<string[]>([]);
+  const [dubbingLanguages, setDubbingLanguages] = useState<string[]>([]);
   const [video, setVideo] = useState<CreatorVideoFile | null>(null);
   const [progress, setProgress] = useState(0);
   const [notice, setNotice] = useState('');
@@ -1897,7 +2401,7 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
     setProgress(0);
     try {
       const mediaKey = await uploadCreatorVideoFile(video, setProgress);
-      const result = await addCreatorEpisode(submission.id, { title: title.trim(), durationSeconds: duration, mediaKey });
+      const result = await addCreatorEpisode(submission.id, { title: title.trim(), durationSeconds: duration, mediaKey, subtitleLanguages, dubbingLanguages });
       Alert.alert('Episode submitted', `Episode ${result.episodeNumber} was added to “${submission.title}” and the series was sent for review.`);
       onSaved();
     } catch (error) {
@@ -1926,6 +2430,9 @@ function AddCreatorEpisodeScreen({ submission, onBack, onSaved }: {
         <Text style={styles.flowLabel}>Duration (seconds)</Text>
         <TextInput value={durationSeconds} onChangeText={setDurationSeconds} editable={!busy} maxLength={5} keyboardType="number-pad" placeholder="120–300" placeholderTextColor={COLORS.textDim} style={styles.flowInput} />
       </View>
+      <Text style={styles.screenSubTitle}>Select languages included in the release. These are saved as metadata; separate subtitle/audio track files are not uploaded or playable yet.</Text>
+      <MultiSelectField label="Subtitle languages" values={subtitleLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setSubtitleLanguages} hint="Choose languages present in the release." />
+      <MultiSelectField label="Dubbing audio languages" values={dubbingLanguages} options={MEDIA_TRACK_LANGUAGES} onChange={setDubbingLanguages} hint="Choose languages present in the release." />
       {busy && <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: progress }} style={styles.uploadProgress}><View style={[styles.uploadProgressFill, { width: `${progress}%` }]} /></View>}
       {busy && <Text style={styles.screenSubTitle}>Uploading episode: {progress}%</Text>}
       {!!notice && <Text style={[styles.screenSubTitle, { marginTop: 12 }]}>{notice}</Text>}
@@ -2293,12 +2800,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 14,
+<<<<<<< HEAD
     paddingBottom: 6,
   },
   brandTitle: { fontSize: 17, fontWeight: '900', color: COLORS.textLight, letterSpacing: 1.4 },
   authLogo: { alignSelf: 'center', color: COLORS.cyan, fontSize: 20, fontWeight: '900', letterSpacing: 1.6, marginBottom: 8 },
+=======
+    paddingBottom: 8,
+  },
+  brandTitle: { fontSize: 23, fontWeight: '900', color: COLORS.textLight, letterSpacing: 0.3 },
+  brandTagline: { color: COLORS.textDim, fontSize: 9, fontWeight: '700', letterSpacing: 1.1, marginTop: 1 },
+  authLogo: { alignSelf: 'center', color: COLORS.textLight, fontSize: 30, fontWeight: '900', letterSpacing: 0.4, marginBottom: 8 },
+  signupAdPreferences: { marginTop: 18, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  signupAdTitle: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
+  signupAdDescription: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 5 },
+  signupAdConsentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 10 },
+  signupAdConsentText: { flex: 1, color: COLORS.textLight, fontSize: 12, fontWeight: '600' },
+>>>>>>> main
   headerRightIcons: { flexDirection: 'row', gap: 8 },
-  iconTxt: { color: COLORS.textLight, fontSize: 20, minWidth: 44, minHeight: 44, textAlign: 'center', textAlignVertical: 'center', paddingHorizontal: 7, paddingVertical: 9 },
+  headerIconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
+  iconTxt: { color: COLORS.textLight, fontSize: 22, textAlign: 'center' },
 
   homeLaneRow: { paddingHorizontal: 20, paddingVertical: 12, gap: 9 },
   homeLaneChip: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 20, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder },
@@ -2321,19 +2842,34 @@ const styles = StyleSheet.create({
   chipText: { color: COLORS.textMuted, fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#ffffff', fontWeight: '800' },
 
+<<<<<<< HEAD
   heroCard: { marginHorizontal: 20, marginTop: 8, borderRadius: 22, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
   heroPosterImage: {
     width: '100%',
     height: 205,
+=======
+  heroCard: { flexDirection: 'row', marginHorizontal: 16, marginTop: 8, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  heroArtwork: { width: '42%', height: 260, position: 'relative', backgroundColor: COLORS.cardBorder },
+  heroPosterImage: {
+    width: '100%',
+    height: 260,
+>>>>>>> main
     backgroundColor: COLORS.cardBg,
-    borderBottomWidth: 1,
-    borderColor: COLORS.cardBorder,
   },
+  heroBadge: { position: 'absolute', top: 10, left: 9, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 5, backgroundColor: 'rgba(20,35,29,0.88)' },
+  heroBadgeText: { color: '#ffffff', fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
   heroGradient: {
     backgroundColor: COLORS.cardBg,
+<<<<<<< HEAD
     paddingHorizontal: 17,
     paddingTop: 15,
     paddingBottom: 17,
+=======
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+>>>>>>> main
   },
   heroPosterPlaceholder: {
     backgroundColor: COLORS.cardBg,
@@ -2362,6 +2898,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
+<<<<<<< HEAD
   heroDramaTitle: { color: COLORS.textLight, fontSize: 21, fontWeight: '900' },
   heroSub: { color: COLORS.textMuted, fontSize: 14, marginTop: 5 },
   heroBtnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
@@ -2374,6 +2911,23 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 14 },
+=======
+  heroEyebrow: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 0.9, marginBottom: 7 },
+  heroDramaTitle: { color: COLORS.textLight, fontSize: 20, lineHeight: 24, fontWeight: '900' },
+  heroSub: { color: COLORS.textMuted, fontSize: 11, lineHeight: 16, marginTop: 7 },
+  heroBtnRow: { alignItems: 'flex-start', gap: 6, marginTop: 14 },
+  cyanActionBtn: {
+    backgroundColor: COLORS.cyan,
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  cyanActionBtnText: { color: '#ffffff', fontWeight: '800', fontSize: 11 },
+  heroDetailsBtn: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 2 },
+  heroDetailsText: { color: COLORS.textMuted, fontSize: 11, fontWeight: '700' },
+>>>>>>> main
   listActionBtn: {
     backgroundColor: COLORS.cardBg,
     paddingVertical: 11,
@@ -2449,6 +3003,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   episodeTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '700', flexShrink: 1 },
+  episodeNumber: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 0.8, marginBottom: 4 },
   episodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 2 },
   cyanSmallBtn: {
     backgroundColor: COLORS.cyan,
@@ -2469,6 +3024,13 @@ const styles = StyleSheet.create({
   playerInfoContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 },
   playerVideoTitle: { color: COLORS.textLight, fontSize: 20, fontWeight: '900' },
   playerEpisodeTitle: { color: COLORS.textMuted, fontSize: 14, fontWeight: '600', marginTop: 5 },
+  nextEpisodeCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16, padding: 13, borderRadius: 12, borderWidth: 1, borderColor: COLORS.cardBorder, backgroundColor: COLORS.cardBg },
+  nextEpisodeCopy: { flex: 1, minWidth: 0 },
+  nextEpisodeEyebrow: { color: COLORS.cyan, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  nextEpisodeTitle: { color: COLORS.textLight, fontSize: 13, fontWeight: '800', marginTop: 4 },
+  nextEpisodeMeta: { color: COLORS.textDim, fontSize: 11, marginTop: 3 },
+  nextEpisodeButton: { minHeight: 42, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 8, backgroundColor: COLORS.cyan },
+  nextEpisodeButtonText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   publisherRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   publisherAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cyanSoft, borderWidth: 1, borderColor: COLORS.cyan },
   publisherAvatarText: { color: COLORS.cyan, fontSize: 18, fontWeight: '900' },
@@ -2786,10 +3348,13 @@ const styles = StyleSheet.create({
   profileAccountStatusText: { color: COLORS.green, fontSize: 9, fontWeight: '800' },
   profileEmail: { color: COLORS.textDim, fontSize: 13, marginTop: 5 },
   profileHeroDivider: { height: 1, backgroundColor: COLORS.cardBorder, marginTop: 17, marginBottom: 14 },
-  profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  profileStatusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   profileMetaColumn: { flex: 1, minWidth: 0 },
   profileMetaLabel: { color: COLORS.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   profileMetaValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '700', marginTop: 4 },
+  profileCoinBalanceButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, marginTop: 2 },
+  profileCoinBalanceValue: { color: COLORS.textLight, fontSize: 14, fontWeight: '800' },
+  profileCoinBalanceArrow: { color: COLORS.cyan, fontSize: 17, fontWeight: '800' },
   profileVipValue: { color: COLORS.gold },
   profileSection: { marginTop: 24 },
   engagementPreferenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 10 },
@@ -2811,8 +3376,28 @@ const styles = StyleSheet.create({
   profilePlanCard: { flex: 1, minHeight: 86, backgroundColor: COLORS.cardBg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 17, paddingHorizontal: 15, paddingVertical: 14, justifyContent: 'center' },
   profilePlanName: { color: COLORS.textDim, fontSize: 12, fontWeight: '700' },
   profilePlanPrice: { color: COLORS.textLight, fontSize: 16, fontWeight: '900', marginTop: 5 },
+<<<<<<< HEAD
   profileRefreshButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 12, borderRadius: 14, backgroundColor: COLORS.cyanSoft },
   profileRefreshText: { color: COLORS.cyan, fontSize: 14, fontWeight: '800' },
+=======
+  coinModal: { width: '100%', maxWidth: 400, alignSelf: 'center', backgroundColor: COLORS.bg, borderWidth: 1, borderColor: COLORS.cardBorder, borderRadius: 14, padding: 18 },
+  coinModalHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  coinModalBalanceRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 8 },
+  coinModalBalance: { color: COLORS.gold, fontSize: 18, fontWeight: '900' },
+  coinPackRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 4 },
+  coinPackInfo: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  coinPackAmount: { color: COLORS.textLight, fontSize: 14, fontWeight: '700' },
+  coinPackPrice: { color: COLORS.cyan, fontSize: 14, fontWeight: '900' },
+  coinMark: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#f5d477', backgroundColor: '#d99b2b' },
+  coinMarkLarge: { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5 },
+  coinMarkInner: { width: 15, height: 15, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#9b6418' },
+  coinMarkInnerLarge: { width: 23, height: 23, borderRadius: 12 },
+  coinMarkLetter: { color: '#855313', fontSize: 10, lineHeight: 12, fontWeight: '900' },
+  coinMarkLetterLarge: { fontSize: 15, lineHeight: 17 },
+  coinMarkShine: { position: 'absolute', top: 3, right: 4, width: 3, height: 3, borderRadius: 2, backgroundColor: '#fff0bd' },
+  profileRefreshButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 12, backgroundColor: COLORS.cyanSoft },
+  profileRefreshText: { color: COLORS.cyan, fontSize: 12, fontWeight: '800' },
+>>>>>>> main
   profileNotice: { color: COLORS.cyan, fontSize: 12, lineHeight: 18, marginTop: 14 },
   profileActions: { marginTop: 24, borderTopWidth: 1, borderColor: COLORS.cardBorder },
   profileActionRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: COLORS.cardBorder, paddingHorizontal: 2 },

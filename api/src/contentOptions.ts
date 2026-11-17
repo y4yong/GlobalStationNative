@@ -46,3 +46,14 @@ export const contentCategories = [
   'Korean Drama',
   'Variety',
 ] as const;
+
+export const mediaTrackLanguages = [
+  'Malay',
+  'English',
+  'Mandarin',
+  'Tamil',
+  'Indonesian',
+  'Japanese',
+  'Korean',
+  'Thai',
+] as const;
