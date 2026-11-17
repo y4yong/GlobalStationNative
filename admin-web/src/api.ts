@@ -35,6 +35,22 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function uploadResponseError(response: Response) {
+  const body = await response.text().catch(() => '');
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as { message?: string; error?: string };
+      const detail = parsed.message ?? parsed.error;
+      if (detail) return detail;
+    } catch {
+      const code = body.match(/<Code>([^<]+)<\/Code>/i)?.[1];
+      const message = body.match(/<Message>([^<]+)<\/Message>/i)?.[1];
+      if (code || message) return `${code ? `${code}: ` : ''}${message ?? ''}`.trim();
+    }
+  }
+  return `File upload failed (${response.status}).`;
+}
+
 export async function login(email: string, password: string) {
   const session = await request<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
   if (session.role !== 'ADMIN') throw new Error('This account does not have administrator access.');
@@ -89,8 +105,7 @@ export const api = {
       throw new Error(`Could not reach the media upload service at ${new URL(uploadUrl).host}. Confirm the API is running and try again.`);
     }
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message ?? `File upload failed (${response.status}).`);
+      throw new Error(await uploadResponseError(response));
     }
     return upload.objectKey;
   },

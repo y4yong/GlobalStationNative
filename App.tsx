@@ -2124,6 +2124,22 @@ async function pickCreatorPoster(): Promise<CreatorPosterFile> {
   return { path, name, size, contentType };
 }
 
+function describeUploadFailure(label: string, status: number, body: string | undefined) {
+  const responseBody = body?.trim();
+  if (responseBody) {
+    try {
+      const parsed = JSON.parse(responseBody) as { message?: string; error?: string };
+      const detail = parsed.message ?? parsed.error;
+      if (detail) return `${label} failed (${status}): ${detail}`;
+    } catch {
+      const code = responseBody.match(/<Code>([^<]+)<\/Code>/i)?.[1];
+      const message = responseBody.match(/<Message>([^<]+)<\/Message>/i)?.[1];
+      if (code || message) return `${label} failed (${status})${code ? ` ${code}` : ''}${message ? `: ${message}` : ''}`;
+    }
+  }
+  return `${label} failed (${status}).`;
+}
+
 async function uploadCreatorPoster(poster: CreatorPosterFile, onProgress?: (progress: number) => void) {
   const upload = await createCreatorPosterUpload(poster.contentType, poster.size);
   const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl,
@@ -2131,7 +2147,7 @@ async function uploadCreatorPoster(poster: CreatorPosterFile, onProgress?: (prog
     ReactNativeBlobUtil.wrap(poster.path))
     .uploadProgress({ interval: 500 }, (written, total) => onProgress?.(Math.round(written / Math.max(1, total) * 100)));
   if (result.info().status < 200 || result.info().status >= 300) {
-    throw new Error(`Poster upload failed (${result.info().status}).`);
+    throw new Error(describeUploadFailure('Poster upload', result.info().status, result.data));
   }
   return upload.objectKey;
 }
@@ -2202,7 +2218,7 @@ function UploadScreen({ onBack }: { onBack: () => void }) {
       const upload = await createCreatorUpload(video.size);
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, 20 + Math.round(written / Math.max(1, total) * 80))));
-      if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
+      if (result.info().status < 200 || result.info().status >= 300) throw new Error(describeUploadFailure('Video upload', result.info().status, result.data));
       await submitCreatorContent({ title: title.trim(), contentType, description: description.trim(), posterKey, posterHorizontalKey, rating, genre, category, episodeTitle: contentType === 'MOVIE' ? title.trim() : episodeTitle.trim(), durationSeconds: episodeDuration, mediaKey: upload.objectKey, isExclusiveVip, subtitleLanguages, dubbingLanguages });
       Alert.alert('Submission received', 'Your video and metadata were saved for content review.');
       onBack();
@@ -2242,7 +2258,7 @@ async function uploadCreatorVideoFile(video: CreatorVideoFile, onProgress: (prog
   const upload = await createCreatorUpload(video.size);
   const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(video.path))
     .uploadProgress({ interval: 500 }, (written, total) => onProgress(Math.min(100, Math.round(written / Math.max(1, total) * 100))));
-  if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Video upload failed (${result.info().status}).`);
+  if (result.info().status < 200 || result.info().status >= 300) throw new Error(describeUploadFailure('Video upload', result.info().status, result.data));
   return upload.objectKey;
 }
 
@@ -2482,7 +2498,7 @@ function CampaignScreen({ onBack }: { onBack: () => void }) {
       const upload = await createAdvertiserUpload(creative.size);
       const result = await ReactNativeBlobUtil.fetch('PUT', upload.uploadUrl, { 'Content-Type': upload.contentType }, ReactNativeBlobUtil.wrap(creative.path))
         .uploadProgress({ interval: 500 }, (written, total) => setProgress(Math.min(100, Math.round(written / Math.max(1, total) * 100))));
-      if (result.info().status < 200 || result.info().status >= 300) throw new Error(`Creative upload failed (${result.info().status}).`);
+      if (result.info().status < 200 || result.info().status >= 300) throw new Error(describeUploadFailure('Creative upload', result.info().status, result.data));
       await createAdvertiserCampaign({ campaignName: campaignName.trim(), creativeKey: upload.objectKey, clickThroughUrl: destination.toString(), cpmRate, totalBudget, targetTier, targetGender, targetAgeRanges, targetCountryCodes, targetMalaysiaStates });
       Alert.alert('Campaign submitted', `Estimated delivery: ${Math.floor(totalBudget / cpmRate * 1000).toLocaleString()} impressions. It will reach viewers after an administrator activates it.`);
       onBack();

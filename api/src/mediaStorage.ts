@@ -372,6 +372,7 @@ export async function storeAdminS3Upload(
       callback(null, chunk);
     },
   });
+  const abortController = new AbortController();
   const putPromise = client.send(new PutObjectCommand({
     Bucket: bucket,
     Key: objectKey,
@@ -379,14 +380,17 @@ export async function storeAdminS3Upload(
     ContentLength: length,
     Metadata: { 'expected-size': String(length) },
     Body: limiter,
-  }));
+  }), { abortSignal: abortController.signal });
   try {
-    await pipeline(request, limiter);
+    await Promise.all([
+      pipeline(request, limiter, { signal: abortController.signal }),
+      putPromise,
+    ]);
     if (receivedBytes !== length || !hasValidFileSignature(contentType, prefixBytes)) {
       throw Object.assign(new Error('Uploaded file type or size is not valid.'), { statusCode: 400 });
     }
-    await putPromise;
   } catch (error) {
+    abortController.abort();
     await putPromise.catch(() => undefined);
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey })).catch(() => undefined);
     throw error;
