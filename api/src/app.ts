@@ -11,7 +11,7 @@ import { deleteContentPermanently, setContentArchived } from './contentLifecycle
 import { listContinueWatching, listDramas } from './catalogRepository.js';
 import { pool } from './db.js';
 import { lookupViewerRegion } from './locationRegions.js';
-import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
+import { createAdminUpload, createAdvertiserUpload, createCreatorPosterUpload, createCreatorUpload, getMediaStorageDirectory, signPlaybackUrl, storeAdminS3Upload, storeLocalUpload, verifyAdminUpload, verifyAdvertiserUpload, verifyCreatorPosterUpload, verifyCreatorUpload } from './mediaStorage.js';
 import { createCoinCheckout, createVipCheckout, currentSubscription, processStripeWebhook } from './billing.js';
 import { coinWallet, purchaseEpisodeWithCoins } from './coins.js';
 import {
@@ -1368,6 +1368,31 @@ app.post('/api/v1/admin/media/uploads', async (request, response, next) => {
       return;
     }
     response.status(201).json(await createAdminUpload(getAdminUserId(request)!, input.data.purpose, input.data.contentType, input.data.contentLength));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/v1/admin/media/upload', async (request, response, next) => {
+  try {
+    const input = z.object({
+      objectKey: z.string().min(1),
+      purpose: z.enum(['poster', 'media']),
+    }).safeParse(request.query);
+    if (!input.success) {
+      request.resume();
+      response.status(400).json({ error: 'INVALID_REQUEST', message: 'A valid media upload key and purpose are required.' });
+      return;
+    }
+    await storeAdminS3Upload(
+      getAdminUserId(request)!,
+      input.data.purpose,
+      input.data.objectKey,
+      request,
+      request.header('content-type') ?? '',
+      request.header('content-length'),
+    );
+    response.sendStatus(201);
   } catch (error) {
     next(error);
   }

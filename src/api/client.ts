@@ -1,26 +1,8 @@
 import { DramaItem, UserRole } from '../data/models/Drama';
 import { createSessionFingerprint, readSession, saveSession } from '../core/security/sessionStorage';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
-function getApiBaseUrl(): string {
-  const scriptUrl = NativeModules.SourceCode?.scriptURL;
-  const bundleHost = __DEV__ && typeof scriptUrl === 'string'
-    ? /^https?:\/\/([^/:?#]+)/i.exec(scriptUrl)?.[1]
-    : undefined;
-  const localBundleHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0', '10.0.2.2']);
-  const reachableBundleHost = bundleHost && !localBundleHosts.has(bundleHost.toLowerCase())
-    ? bundleHost
-    : undefined;
-  // React Native's Android model constant is not consistent across runtimes.
-  // Prefer a reachable Metro/LAN host when supplied; otherwise Android's
-  // emulator bridge is the reliable local API address.
-  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-  const host = reachableBundleHost ?? fallbackHost;
-
-  return `http://${host}:5000/api/v1`;
-}
-
-export const API_BASE_URL = getApiBaseUrl();
+export const API_BASE_URL = 'https://dwxk03p9zr93n.cloudfront.net/api/v1';
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/v1\/?$/i, '');
 
 export function normalizeUrl(url: string | null | undefined): string | null {

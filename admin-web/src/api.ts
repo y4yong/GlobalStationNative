@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api/v1';
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://dwxk03p9zr93n.cloudfront.net/api/v1';
 
 function getAdminUploadUrl(uploadUrl: string) {
   const upload = new URL(uploadUrl);
@@ -70,10 +70,21 @@ export const api = {
   }),
   uploadMediaFile: async (purpose: 'poster' | 'media', file: File) => {
     const upload = await api.createMediaUpload(purpose, file);
-    const uploadUrl = getAdminUploadUrl(upload.uploadUrl);
+    const isApiUpload = upload.uploadUrl.startsWith('/api/v1/admin/media/upload?');
+    const apiOrigin = API_URL.replace(/\/api\/v1\/?$/i, '');
+    const uploadUrl = isApiUpload ? `${apiOrigin}${upload.uploadUrl}` : getAdminUploadUrl(upload.uploadUrl);
     let response: Response;
     try {
-      response = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': upload.contentType, ...upload.requiredHeaders }, body: file });
+      const token = localStorage.getItem('gs_admin_token');
+      response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': upload.contentType,
+          ...upload.requiredHeaders,
+          ...(isApiUpload && token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: file,
+      });
     } catch {
       throw new Error(`Could not reach the media upload service at ${new URL(uploadUrl).host}. Confirm the API is running and try again.`);
     }

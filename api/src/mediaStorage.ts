@@ -327,13 +327,70 @@ export async function createAdminUpload(adminId: string, purpose: 'poster' | 'me
       maximumBytes,
     };
   }
+  return {
+    uploadUrl: `/api/v1/admin/media/upload?objectKey=${encodeURIComponent(objectKey)}&purpose=${purpose}`,
+    objectKey,
+    contentType,
+    requiredHeaders: {},
+    expiresInSeconds: uploadLifetimeSeconds,
+    maximumBytes,
+  };
+}
+
+export async function storeAdminS3Upload(
+  adminId: string,
+  purpose: 'poster' | 'media',
+  objectKey: string,
+  request: Readable,
+  contentType: string,
+  declaredLength: string | undefined,
+) {
+  const prefix = `admin/${adminId}/${purpose}/`;
+  const allowedTypes = purpose === 'poster' ? ['image/jpeg', 'image/png', 'image/webp'] : ['video/mp4'];
+  const maximumBytes = purpose === 'poster' ? 10 * 1024 * 1024 : config.MEDIA_UPLOAD_MAX_BYTES;
+  if (!objectKey.startsWith(prefix) || objectKey.includes('..')) {
+    request.resume();
+    throw Object.assign(new Error('The uploaded object does not belong to this admin upload request.'), { statusCode: 403 });
+  }
+  const length = Number(declaredLength);
+  if (!allowedTypes.includes(contentType) || !Number.isSafeInteger(length) || length < 1 || length > maximumBytes) {
+    request.resume();
+    throw Object.assign(new Error('The uploaded file type or size is not allowed.'), { statusCode: 400 });
+  }
+
   const { client, bucket } = getStorageConfig();
-  const command = new PutObjectCommand({ Bucket: bucket, Key: objectKey, ContentType: contentType, Metadata: { 'expected-size': String(contentLength) } });
-  const uploadUrl = await getS3SignedUrl(client, command, {
-    expiresIn: 600,
-    signableHeaders: new Set(['content-type', 'x-amz-meta-expected-size']),
+  let receivedBytes = 0;
+  let prefixBytes = Buffer.alloc(0);
+  const limiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      receivedBytes += chunk.length;
+      if (receivedBytes > length || receivedBytes > maximumBytes) {
+        callback(Object.assign(new Error('The uploaded file exceeds the requested size.'), { statusCode: 413 }));
+        return;
+      }
+      if (prefixBytes.length < 12) prefixBytes = Buffer.concat([prefixBytes, chunk.subarray(0, 12 - prefixBytes.length)]);
+      callback(null, chunk);
+    },
   });
-  return { uploadUrl, objectKey, contentType, requiredHeaders: { 'x-amz-meta-expected-size': String(contentLength) }, expiresInSeconds: 600, maximumBytes };
+  const putPromise = client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: objectKey,
+    ContentType: contentType,
+    ContentLength: length,
+    Metadata: { 'expected-size': String(length) },
+    Body: limiter,
+  }));
+  try {
+    await pipeline(request, limiter);
+    if (receivedBytes !== length || !hasValidFileSignature(contentType, prefixBytes)) {
+      throw Object.assign(new Error('Uploaded file type or size is not valid.'), { statusCode: 400 });
+    }
+    await putPromise;
+  } catch (error) {
+    await putPromise.catch(() => undefined);
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey })).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function verifyAdminUpload(adminId: string, purpose: 'poster' | 'media', objectKey: string) {
