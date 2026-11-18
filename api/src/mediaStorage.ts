@@ -30,7 +30,10 @@ function getStorageConfig() {
   if (!config.AWS_REGION || !config.AWS_S3_BUCKET) {
     throw unavailable('AWS media storage is not configured. Set AWS_REGION and AWS_S3_BUCKET.');
   }
-  s3Client ??= new S3Client({ region: config.AWS_REGION });
+  // The SDK's default checksum behavior adds an empty CRC32 checksum to
+  // presigned PutObject URLs. Browser uploads then send a non-empty body that
+  // cannot match that checksum, so presigned PUTs are rejected by S3.
+  s3Client ??= new S3Client({ region: config.AWS_REGION, requestChecksumCalculation: 'WHEN_REQUIRED' });
   return { client: s3Client, bucket: config.AWS_S3_BUCKET };
 }
 
